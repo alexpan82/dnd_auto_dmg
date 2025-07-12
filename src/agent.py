@@ -6,9 +6,8 @@ from langgraph.graph import StateGraph, END
 from langchain.chat_models import ChatOpenAI
 from langchain.schema import SystemMessage
 from typing import TypedDict, Optional, List, Dict, Any
-import random
-import re
 from langgraph.checkpoint.memory import MemorySaver
+from tools import roll
 
 # -------- Set up OpenAI Key and Model -------- #
 def _set_env(var: str):
@@ -29,18 +28,6 @@ class CombatState(TypedDict):
     target: Optional[Dict]
     damage_report: Optional[Dict]
     log: List[str]
-
-
-# --------- TOOL: Dice Roller --------- #
-def roll(dice_expr: str) -> int:
-    # Basic dice parser: 2d6+3 => [2,6,+3]
-    match = re.fullmatch(r"(\d*)d(\d+)([+-]\d+)?", dice_expr.replace(" ", ""))
-    if not match:
-        raise ValueError(f"Invalid dice expression: {dice_expr}")
-    num = int(match.group(1)) if match.group(1) else 1
-    die = int(match.group(2))
-    mod = int(match.group(3)) if match.group(3) else 0
-    return sum(random.randint(1, die) for _ in range(num)) + mod
 
 
 # --------- PARSER NODE --------- #
