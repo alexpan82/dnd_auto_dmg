@@ -2,12 +2,14 @@ import random
 import re
 
 import pyaudio
-import wave
+# import wave
 import tempfile
 import os
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import torch
 import numpy as np
+
+
 # --------- TOOL: Dice Roller --------- #
 def roll(dice_expr: str) -> int:
     # Basic dice parser: 2d6+3 => [2,6,+3]
@@ -39,7 +41,7 @@ def transcribe_voice_input(duration=5, sample_rate=16000, chunk_size=1024):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     
-    model_id = "openai/whisper-large-v3-turbo"
+    model_id = "openai/whisper-base"
     
     # Load model and processor
     model = AutoModelForSpeechSeq2Seq.from_pretrained(
