@@ -7,7 +7,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.schema import SystemMessage
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.checkpoint.memory import MemorySaver
-from tools import roll
+from tools import roll, extract_json
 
 # -------- Set up OpenAI Key and Model -------- #
 def _set_env(var: str):
@@ -45,7 +45,8 @@ def parse_action(state: CombatState) -> CombatState:
     If no match, return null."""
 
     response = llm.invoke([SystemMessage(content=prompt)])
-    state["parsed_action"] = eval(response.content) if "{" in response.content else None
+    cleaned_response = extract_json(response.content) if "{" in response.content else None
+    state["parsed_action"] = cleaned_response
     return state
 
 
@@ -150,7 +151,8 @@ if __name__ == "__main__":
     # Specify a thread
     config = {"configurable": {"thread_id": "1"}}
 
-    user_input = input("🎲 Describe your attack: ")
+    # user_input = input("🎲 Describe your attack: ")
+    user_input = 'Avantor attacks with his greatsword'
     result = app.invoke({
         "user_input": user_input,
         "log": []

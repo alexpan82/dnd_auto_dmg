@@ -1,7 +1,7 @@
 import random
 import re
 
-import pyaudio
+# import pyaudio
 # import wave
 import tempfile
 import os
@@ -20,6 +20,35 @@ def roll(dice_expr: str) -> int:
     die = int(match.group(2))
     mod = int(match.group(3)) if match.group(3) else 0
     return sum(random.randint(1, die) for _ in range(num)) + mod
+
+
+# Adding json cleanup
+def extract_json(text:str):
+    """
+    Extract JSON from a string by removing leading and trailing non-JSON characters.
+    """
+    # Find the first opening brace or bracket
+    start_pattern = r'[{\[]'
+    start_match = re.search(start_pattern, text)
+    
+    if not start_match:
+        return None
+    
+    start_pos = start_match.start()
+    start_char = text[start_pos]
+    end_char = '}' if start_char == '{' else ']'
+    
+    # Count nested braces/brackets to find the matching closing one
+    count = 0
+    for i, char in enumerate(text[start_pos:], start_pos):
+        if char == start_char:
+            count += 1
+        elif char == end_char:
+            count -= 1
+            if count == 0:
+                return text[start_pos:i+1]
+    
+    return None
 
 
 # TODO: Test this!
