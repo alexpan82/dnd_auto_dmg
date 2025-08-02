@@ -41,11 +41,12 @@ def parse_action(state: CombatState) -> CombatState:
     prompt = f"""You are a D&D action interpreter. Parse this input into JSON:
     "{state['user_input']}"
     Output format:
-    {{"character_id": "...", "action_type": "...", "weapon_id": "...", "target_id": "...", "is_critical_hit": true/false, "using_feat": [...]}}
+    {{"character": "...", "action_type": "...", "weapon_id": "...", "target_id": "...", "is_critical_hit": true/false, "using_feat": [...]}}
     If no match, return null."""
 
     response = llm.invoke([SystemMessage(content=prompt)])
     cleaned_response = extract_json(response.content) if "{" in response.content else None
+
     state["parsed_action"] = cleaned_response
     return state
 
@@ -54,13 +55,11 @@ def parse_action(state: CombatState) -> CombatState:
 def load_character(state: CombatState) -> CombatState:
     # Mock character data
     char_db = {
-        "avantor_001": {
-            "name": "Avantor",
+        "Avantor": {
             "attributes": {"strength": 18},
             "features": ["Savage Attacks", "Great Weapon Master"],
             "inventory": {
-                "flametongue_gs_001": {
-                    "name": "Flametongue Greatsword",
+                "Flametongue Greatsword": {
                     "damage": ["2d6", "2d6"],
                     "type": "slashing",
                     "magic_bonus": 1
@@ -68,7 +67,8 @@ def load_character(state: CombatState) -> CombatState:
             }
         }
     }
-    char_id = state["parsed_action"]["character_id"]
+    print(state["parsed_action"])
+    char_id = state["parsed_action"]["character"]
     state["character"] = char_db.get(char_id)
     return state
 
@@ -91,8 +91,14 @@ def calculate_damage(state: CombatState) -> CombatState:
     action = state["parsed_action"]
     status = state["status"]
     
-    weapon = char["inventory"][action["weapon_id"]]
-    is_crit = action.get("is_critical_hit", False)
+    # TODO: Write a fuzzy match helper for this
+    # Example: A user might say "Attack with my sword"
+    # But the char["inventory"] json has a name attr w/ Flametongue Greatsword
+    # Should return a json
+    # weapon = char["inventory"][action["weapon_id"]]
+    weapon = {"damage": ["2d6", "2d6"], "type": "slashing", "magic_bonus": 1}
+    # is_crit = action.get("is_critical_hit", False)
+    is_crit = action['is_critical_hit']
     
     damage_components = weapon["damage"]
     total = 0
@@ -119,7 +125,7 @@ def calculate_damage(state: CombatState) -> CombatState:
 # --------- OUTPUT NODE --------- #
 
 def narrator_output(state: CombatState) -> CombatState:
-    char_name = state["character"]["name"]
+    char_name = state["character"]
     dmg = state["damage_report"]
     desc = f"{char_name} hits for {dmg['total_damage']} damage! ({', '.join(f'{k}: {v}' for k,v in dmg['breakdown'].items())})"
     state["log"].append(desc)

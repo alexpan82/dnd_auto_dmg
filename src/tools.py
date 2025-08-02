@@ -8,6 +8,7 @@ import os
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import torch
 import numpy as np
+import json
 
 
 # --------- TOOL: Dice Roller --------- #
@@ -23,7 +24,7 @@ def roll(dice_expr: str) -> int:
 
 
 # Adding json cleanup
-def extract_json(text:str):
+def extract_json(text:str) -> dict:
     """
     Extract JSON from a string by removing leading and trailing non-JSON characters.
     """
@@ -46,8 +47,12 @@ def extract_json(text:str):
         elif char == end_char:
             count -= 1
             if count == 0:
-                return text[start_pos:i+1]
-    
+                cleaned_str = text[start_pos:i+1]
+                try:
+                    return json.loads(cleaned_str)
+                except json.decoder.JSONDecodeError:
+                    return None
+                
     return None
 
 
