@@ -21,25 +21,29 @@ tools = [roll_dice]
 llm = ChatOpenAI(model="gpt-4o")
 llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
+
 # -------- STATE DEFINITION -------- #
 class CombatState(TypedDict):
     user_input: str
     parsed_action: Optional[Dict]
     character: Optional[Dict]
+    hp: int
     status: Optional[Dict]
     target: Optional[Dict]
     damage_report: Optional[Dict]
     log: List[str]
 
 
-#
+# --------- ASSISTANT NODE --------- #
+# Base agent system calls
 sys_msg = '''You are a knowledgeable DnD DM tasked with calculating damage rolls. 
 The player will provide a piece of action dialogue containing who is attacking and with what.
 You are to calculate the total damage of the action and provide the damage-type breakdown based on provided json-formatted parameters (features, weapon, stats, etc) that determine the damage.'''
 def assistant(state: MessagesState):
     return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
 
-
+# A router that determines the relevancy of the user input
+# and decides whether to calculate dmg or not
 def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
     prompt = f"""Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
     Content: 
@@ -50,6 +54,7 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
         return "parse_action"
     else:
         return "end"
+
 
 # --------- PARSER NODE --------- #
 # TODO: We should load the character and target prior to this node
@@ -105,6 +110,7 @@ def load_status(state: CombatState) -> CombatState:
     }
     return state
 
+
 # --------- DAMAGE CALCULATOR NODE --------- #
 # TODO: Make this a react agent call rather than rely on a for-loop
 # to roll for damage for each dmg type
@@ -144,8 +150,8 @@ def calculate_damage(state: CombatState) -> CombatState:
     }
     return state
 
-# --------- OUTPUT NODE --------- #
 
+# --------- OUTPUT NODE --------- #
 def narrator_output(state: CombatState) -> CombatState:
     char_name = state["character"]
     dmg = state["damage_report"]
@@ -154,8 +160,8 @@ def narrator_output(state: CombatState) -> CombatState:
     print("🧙 " + desc)
     return state
 
-# --------- BUILD LANGGRAPH --------- #
 
+# --------- BUILD LANGGRAPH --------- #
 graph = StateGraph(CombatState)
 graph.add_node("assistant", assistant)
 graph.add_node("roll_dice", ToolNode(tools))
@@ -182,6 +188,7 @@ graph.add_edge("load_status", "calculate_damage")
 graph.add_edge("calculate_damage", "narrate")
 graph.add_edge("narrate", END)
 
+
 # --------- COMPILE AND RUN --------- #
 memory = MemorySaver()
 app = graph.compile(checkpointer=memory)
@@ -195,10 +202,10 @@ if __name__ == "__main__":
 
     # user_input = input("🎲 Describe your attack: ")
 
-    '''user_input = 'Avantor attacks with his greatsword'
+    user_input = 'Avantor attacks with his greatsword'
     result = app.invoke({
         "user_input": user_input,
         "log": []
         },
         config)
-    '''
+    
