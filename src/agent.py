@@ -8,6 +8,9 @@ from typing import TypedDict, Optional, List, Dict, Any, Literal
 from langgraph.checkpoint.memory import MemorySaver
 from tools import roll_dice, extract_json
 from langgraph.prebuilt import ToolNode, tools_condition
+from typing import Annotated, Sequence
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 # -------- Set up OpenAI Key and Model -------- #
@@ -19,14 +22,16 @@ _set_env("OPENAI_API_KEY")
 
 tools = [roll_dice]
 llm = ChatOpenAI(model="gpt-4o")
-llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+llm = llm.bind_tools(tools, parallel_tool_calls=False)
 
 
 # -------- STATE DEFINITION -------- #
 class CombatState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     user_input: str
     parsed_action: Optional[Dict]
     character: Optional[Dict]
+    character_id: str
     hp: int
     status: Optional[Dict]
     target: Optional[Dict]
@@ -39,8 +44,8 @@ class CombatState(TypedDict):
 sys_msg = '''You are a knowledgeable DnD DM tasked with calculating damage rolls. 
 The player will provide a piece of action dialogue containing who is attacking and with what.
 You are to calculate the total damage of the action and provide the damage-type breakdown based on provided json-formatted parameters (features, weapon, stats, etc) that determine the damage.'''
-def assistant(state: MessagesState):
-    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+def assistant(state: CombatState):
+    return {"messages": [llm.invoke([sys_msg] + state["messages"])]}
 
 # A router that determines the relevancy of the user input
 # and decides whether to calculate dmg or not
@@ -64,8 +69,8 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
 # TODO: Consider how to heal / get temp hp
 def parse_action(state: CombatState) -> CombatState:
     # Ask the LLM to extract structured action info
-    prompt = f"""You are a D&D action interpreter. Parse this input into JSON:
-    "{state['user_input']}"
+    prompt = f"""You are a D&D action interpreter. Parse the user natural language input into JSON:
+    User input: {state['user_input']}
     Output format:
     {{"character": "...", "action_type": "...", "weapon_id": "...", "target_id": "...", "is_critical_hit": true/false, "using_feat": [...]}}
     If no match, return null."""
@@ -93,13 +98,13 @@ def load_character(state: CombatState) -> CombatState:
             }
         }
     }
-    print(state["parsed_action"])
     char_id = state["parsed_action"]["character"]
     state["character"] = char_db.get(char_id)
+    state["character_id"] = char_id
     return state
 
-# --------- STATUS EFFECT LOADER NODE --------- #
 
+# --------- STATUS EFFECT LOADER NODE --------- #
 def load_status(state: CombatState) -> CombatState:
     # Mock status context (e.g., target has fire resistance)
     state["status"] = {
@@ -116,38 +121,38 @@ def load_status(state: CombatState) -> CombatState:
 # to roll for damage for each dmg type
 def calculate_damage(state: CombatState) -> CombatState:
     char = state["character"]
+    char_id = state["character_id"]
     action = state["parsed_action"]
     status = state["status"]
-    
+    is_crit = action['is_critical_hit']
+
     # TODO: Write a fuzzy match helper for this
     # Example: A user might say "Attack with my sword"
     # But the char["inventory"] json has a name attr w/ Flametongue Greatsword
     # Should return a json
     # weapon = char["inventory"][action["weapon_id"]]
     weapon = {"damage": ["2d6", "2d6"], "type": "slashing", "magic_bonus": 1}
-    # is_crit = action.get("is_critical_hit", False)
-    is_crit = action['is_critical_hit']
     
-    damage_components = weapon["damage"]
-    total = 0
-    breakdown = {}
+    prompt = f"""Roll resultant die for {char_id} given the following information:
+    {char_id} action: {action}
+    weapon/spell json: {weapon}
+    {char_id} attributes: {char}
+    {char_id} status: {status}
+    is_crit: {is_crit}
 
-    for dmg_expr in damage_components:
-        base_expr = dmg_expr
-        if is_crit:
-            base_expr = f"{int(base_expr[0]) * 2}d{base_expr[2:]}" if base_expr[1] == 'd' else base_expr
-        dmg = roll_dice(base_expr)
-        dtype = "fire" if "fire" in base_expr else weapon["type"]
-        if dtype in status["resistances"]:
-            dmg = dmg // 2
-        breakdown[dtype] = breakdown.get(dtype, 0) + dmg
-        total += dmg
-    
-    state["damage_report"] = {
-        "total_damage": total,
-        "breakdown": breakdown,
-        "notes": ["Critical hit" if is_crit else "Normal hit"]
-    }
+    Output in json format:
+    {{"total_damage": int, 
+     "breakdown": json,
+     "notes": str}}
+     """
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+    # TODO: Get AI message from this tool call. response content is empty
+    print("calculate_damage", response)
+
+    cleaned_response = extract_json(response.content) if "{" in response.content else None
+
+    state["damage_report"] = cleaned_response
     return state
 
 
@@ -155,9 +160,10 @@ def calculate_damage(state: CombatState) -> CombatState:
 def narrator_output(state: CombatState) -> CombatState:
     char_name = state["character"]
     dmg = state["damage_report"]
-    desc = f"{char_name} hits for {dmg['total_damage']} damage! ({', '.join(f'{k}: {v}' for k,v in dmg['breakdown'].items())})"
-    state["log"].append(desc)
-    print("🧙 " + desc)
+    # desc = f"{char_name} hits for {dmg['total_damage']} damage! ({', '.join(f'{k}: {v}' for k,v in dmg['breakdown'].items())})"
+    # state["log"].append(desc)
+    # print("🧙 " + desc)
+    print("🧙 " + dmg)
     return state
 
 
@@ -185,7 +191,17 @@ graph.add_conditional_edges(
 graph.add_edge("parse_action", "load_character")
 graph.add_edge("load_character", "load_status")
 graph.add_edge("load_status", "calculate_damage")
-graph.add_edge("calculate_damage", "narrate")
+graph.add_edge("roll_dice", "calculate_damage")
+graph.add_conditional_edges(
+    "calculate_damage",
+    # If the latest message (result) from assistant is a tool call -> tools_condition routes to tools
+    # If the latest message (result) from assistant is a not a tool call -> tools_condition routes to END
+    tools_condition,
+    {
+        'tools': 'roll_dice',
+        END: 'narrate'
+    }
+)
 graph.add_edge("narrate", END)
 
 
