@@ -6,6 +6,8 @@ We need an automated system that seamlessly integrates into the role-playing exp
 
 We present DnD-Auto-Damage (DaD), an LLM-driven agentic workflow that addresses these limitations in managing combat logistics.
 
+![Agent Graph](docs/graph.png "Agent Graph")
+
 ## Set up
 
 ### Create venv and install dependencies

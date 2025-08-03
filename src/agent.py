@@ -9,6 +9,7 @@ from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.checkpoint.memory import MemorySaver
 from tools import roll, extract_json
 
+
 # -------- Set up OpenAI Key and Model -------- #
 def _set_env(var: str):
     if not os.environ.get(var):
@@ -156,8 +157,11 @@ app = graph.compile(checkpointer=memory)
 if __name__ == "__main__":
     # Specify a thread
     config = {"configurable": {"thread_id": "1"}}
+    
+    app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
 
     # user_input = input("🎲 Describe your attack: ")
+
     user_input = 'Avantor attacks with his greatsword'
     result = app.invoke({
         "user_input": user_input,
