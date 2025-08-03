@@ -12,8 +12,14 @@ import json
 
 
 # --------- TOOL: Dice Roller --------- #
-def roll(dice_expr: str) -> int:
-    # Basic dice parser: 2d6+3 => [2,6,+3]
+def roll_dice(dice_expr: str) -> int:
+    """Rolls dice plus modifier in the following format:
+    ndm+x where n is the number of dice, m is the number of sides the dice have, and x is the modifier
+    Ex: 2d6+3 => Roll 2 6-sided die and then add 3 to the total [2,6,+3]
+
+    Args:
+        dice_expr: str in ndm+x format
+    """
     match = re.fullmatch(r"(\d*)d(\d+)([+-]\d+)?", dice_expr.replace(" ", ""))
     if not match:
         raise ValueError(f"Invalid dice expression: {dice_expr}")
@@ -57,7 +63,6 @@ def extract_json(text:str) -> dict:
 
 
 # TODO: Test this!
-# --------- TOOL: Dice Roller --------- #
 def transcribe_voice_input(duration=5, sample_rate=16000, chunk_size=1024):
     """
     Captures microphone input and transcribes it using Whisper large-v3-turbo model.

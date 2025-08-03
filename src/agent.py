@@ -3,11 +3,11 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import MessagesState
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
-from langchain.chat_models import ChatOpenAI
 from langchain.schema import SystemMessage
-from typing import TypedDict, Optional, List, Dict, Any
+from typing import TypedDict, Optional, List, Dict, Any, Literal
 from langgraph.checkpoint.memory import MemorySaver
-from tools import roll, extract_json
+from tools import roll_dice, extract_json
+from langgraph.prebuilt import ToolNode, tools_condition
 
 
 # -------- Set up OpenAI Key and Model -------- #
@@ -17,8 +17,9 @@ def _set_env(var: str):
 
 _set_env("OPENAI_API_KEY")
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
-
+tools = [roll_dice]
+llm = ChatOpenAI(model="gpt-4o")
+llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
 # -------- STATE DEFINITION -------- #
 class CombatState(TypedDict):
@@ -30,6 +31,25 @@ class CombatState(TypedDict):
     damage_report: Optional[Dict]
     log: List[str]
 
+
+#
+sys_msg = '''You are a knowledgeable DnD DM tasked with calculating damage rolls. 
+The player will provide a piece of action dialogue containing who is attacking and with what.
+You are to calculate the total damage of the action and provide the damage-type breakdown based on provided json-formatted parameters (features, weapon, stats, etc) that determine the damage.'''
+def assistant(state: MessagesState):
+    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+
+
+def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
+    prompt = f"""Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
+    Content: 
+    {state['user_input']}"""
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+    if "yes" in response.content.lower():
+        return "parse_action"
+    else:
+        return "end"
 
 # --------- PARSER NODE --------- #
 # TODO: We should load the character and target prior to this node
@@ -86,7 +106,8 @@ def load_status(state: CombatState) -> CombatState:
     return state
 
 # --------- DAMAGE CALCULATOR NODE --------- #
-
+# TODO: Make this a react agent call rather than rely on a for-loop
+# to roll for damage for each dmg type
 def calculate_damage(state: CombatState) -> CombatState:
     char = state["character"]
     action = state["parsed_action"]
@@ -109,7 +130,7 @@ def calculate_damage(state: CombatState) -> CombatState:
         base_expr = dmg_expr
         if is_crit:
             base_expr = f"{int(base_expr[0]) * 2}d{base_expr[2:]}" if base_expr[1] == 'd' else base_expr
-        dmg = roll(base_expr)
+        dmg = roll_dice(base_expr)
         dtype = "fire" if "fire" in base_expr else weapon["type"]
         if dtype in status["resistances"]:
             dmg = dmg // 2
@@ -136,13 +157,25 @@ def narrator_output(state: CombatState) -> CombatState:
 # --------- BUILD LANGGRAPH --------- #
 
 graph = StateGraph(CombatState)
+graph.add_node("assistant", assistant)
+graph.add_node("roll_dice", ToolNode(tools))
 graph.add_node("parse_action", parse_action)
 graph.add_node("load_character", load_character)
 graph.add_node("load_status", load_status)
 graph.add_node("calculate_damage", calculate_damage)
 graph.add_node("narrate", narrator_output)
 
-graph.set_entry_point("parse_action")
+graph.set_entry_point("assistant")
+graph.add_edge("assistant", "parse_action")
+# graph.add_edge("assistant", END)
+graph.add_conditional_edges(
+    "assistant",
+    decide_relevance,
+    {
+        "parse_action": "parse_action",
+        "end": END
+    }
+)
 graph.add_edge("parse_action", "load_character")
 graph.add_edge("load_character", "load_status")
 graph.add_edge("load_status", "calculate_damage")
@@ -162,9 +195,10 @@ if __name__ == "__main__":
 
     # user_input = input("🎲 Describe your attack: ")
 
-    user_input = 'Avantor attacks with his greatsword'
+    '''user_input = 'Avantor attacks with his greatsword'
     result = app.invoke({
         "user_input": user_input,
         "log": []
         },
         config)
+    '''
