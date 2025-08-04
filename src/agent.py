@@ -40,15 +40,7 @@ class CombatState(TypedDict):
     relevant_query: str
 
 
-# --------- ASSISTANT NODE --------- #
-# Base agent system calls
-sys_msg = '''You are a knowledgeable DnD DM tasked with calculating damage rolls. 
-The player will provide a piece of action dialogue containing who is attacking and with what.
-You are to calculate the total damage of the action and provide the damage-type breakdown based on provided json-formatted parameters (features, weapon, stats, etc) that determine the damage.'''
-def assistant(state: CombatState):
-    return {"messages": [SystemMessage(content=sys_msg)] + 
-            [llm.invoke([sys_msg] + state["messages"])]}
-
+# --------- RELEVANCE ROUTER --------- #
 # A router that determines the relevancy of the user input
 # and decides whether to calculate dmg or not
 def is_relevant_query(state: CombatState) -> CombatState:
@@ -178,18 +170,16 @@ def calculate_damage(state: CombatState) -> CombatState:
 
 # --------- OUTPUT NODE --------- #
 def narrator_output(state: CombatState) -> CombatState:
-    # char_name = state["character"]
-    # dmg = state["damage_report"]
-    # desc = f"{char_name} hits for {dmg['total_damage']} damage! ({', '.join(f'{k}: {v}' for k,v in dmg['breakdown'].items())})"
-    # state["log"].append(desc)
-    # print("🧙 " + desc)
-    # print("🧙 " + dmg)
-    return state
+    # Base agent system calls
+    sys_msg = ''''''
+    
+    return {"messages": [SystemMessage(content=sys_msg)] + 
+            [llm.invoke([sys_msg] + state["messages"])]}
+
 
 
 # --------- BUILD LANGGRAPH --------- #
 graph = StateGraph(CombatState)
-# graph.add_node("assistant", assistant)
 graph.add_node("is_relevant_query", is_relevant_query)
 graph.add_node("roll_dice", ToolNode(tools))
 graph.add_node("parse_action", parse_action)
