@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph, END
 from langchain.schema import SystemMessage
 from typing import TypedDict, Optional, List, Dict, Any, Literal
 from langgraph.checkpoint.memory import MemorySaver
-from tools import roll_dice, extract_json
+from tools import roll_dice, extract_json, add, subtract, multiply, divide
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import Annotated, Sequence
 from langchain_core.messages import BaseMessage
@@ -21,7 +21,7 @@ def _set_env(var: str):
 _set_env("OPENAI_API_KEY")
 
 llm = ChatOpenAI(model="gpt-4o")
-tools = [roll_dice]
+tools = [roll_dice, add, subtract, multiply, divide]
 llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
 
