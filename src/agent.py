@@ -92,7 +92,7 @@ def parse_action(state: CombatState) -> CombatState:
 
 
 # --------- CHARACTER LOADER NODE --------- #
-def load_character(state: CombatState) -> CombatState:
+def load_attributes(state: CombatState) -> CombatState:
     # Mock character data
     char_db = {
         "Avantor": {
@@ -110,12 +110,7 @@ def load_character(state: CombatState) -> CombatState:
     char_id = state["parsed_action"]["character"]
     state["character"] = char_db.get(char_id)
     state["character_id"] = char_id
-    return state
 
-
-# --------- STATUS EFFECT LOADER NODE --------- #
-def load_status(state: CombatState) -> CombatState:
-    # Mock status context (e.g., target has fire resistance)
     state["status"] = {
         "target_id": state["parsed_action"]["target_id"],
         "resistances": ["fire"],
@@ -123,7 +118,6 @@ def load_status(state: CombatState) -> CombatState:
         "homebrew_modifiers": []
     }
     return state
-
 
 # --------- DAMAGE CALCULATOR NODE --------- #
 # TODO: Make this a react agent call rather than rely on a for-loop
@@ -183,8 +177,7 @@ graph = StateGraph(CombatState)
 graph.add_node("is_relevant_query", is_relevant_query)
 graph.add_node("roll_dice", ToolNode(tools))
 graph.add_node("parse_action", parse_action)
-graph.add_node("load_character", load_character)
-graph.add_node("load_status", load_status)
+graph.add_node("load_attributes", load_attributes)
 graph.add_node("calculate_damage", calculate_damage)
 graph.add_node("narrate", narrator_output)
 
@@ -199,9 +192,8 @@ graph.add_conditional_edges(
 )
 graph.add_edge("is_relevant_query", "parse_action")
 
-graph.add_edge("parse_action", "load_character")
-graph.add_edge("load_character", "load_status")
-graph.add_edge("load_status", "calculate_damage")
+graph.add_edge("parse_action", "load_attributes")
+graph.add_edge("load_attributes", "calculate_damage")
 # graph.add_edge("calculate_damage", "assistant")
 graph.add_conditional_edges(
     "calculate_damage",
