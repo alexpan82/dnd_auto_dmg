@@ -20,9 +20,9 @@ def _set_env(var: str):
 
 _set_env("OPENAI_API_KEY")
 
-tools = [roll_dice]
 llm = ChatOpenAI(model="gpt-4o")
-llm = llm.bind_tools(tools, parallel_tool_calls=False)
+tools = [roll_dice]
+llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
 
 # -------- STATE DEFINITION -------- #
@@ -37,6 +37,7 @@ class CombatState(TypedDict):
     target: Optional[Dict]
     damage_report: Optional[Dict]
     log: List[str]
+    relevant_query: str
 
 
 # --------- ASSISTANT NODE --------- #
@@ -45,17 +46,28 @@ sys_msg = '''You are a knowledgeable DnD DM tasked with calculating damage rolls
 The player will provide a piece of action dialogue containing who is attacking and with what.
 You are to calculate the total damage of the action and provide the damage-type breakdown based on provided json-formatted parameters (features, weapon, stats, etc) that determine the damage.'''
 def assistant(state: CombatState):
-    return {"messages": [llm.invoke([sys_msg] + state["messages"])]}
+    return {"messages": [SystemMessage(content=sys_msg)] + 
+            [llm_with_tools.invoke([sys_msg] + state["messages"])]}
 
 # A router that determines the relevancy of the user input
 # and decides whether to calculate dmg or not
-def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
-    prompt = f"""Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
-    Content: 
+def is_relevant_query(state: CombatState) -> CombatState:
+    prompt = """Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
+    """
+    user_prompt = f"""Content: 
     {state['user_input']}"""
 
-    response = llm.invoke([SystemMessage(content=prompt)])
-    if "yes" in response.content.lower():
+    message = [SystemMessage(content=prompt)] + [HumanMessage(user_prompt)]
+    response = llm.invoke(message)
+
+    return {
+        "messages": message + [response],
+        "relevant_query": response.content.lower()
+    }
+
+
+def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
+    if "yes" in state['relevant_query']:
         return "parse_action"
     else:
         return "end"
@@ -69,17 +81,22 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
 # TODO: Consider how to heal / get temp hp
 def parse_action(state: CombatState) -> CombatState:
     # Ask the LLM to extract structured action info
-    prompt = f"""You are a D&D action interpreter. Parse the user natural language input into JSON:
+    prompt = "You are a D&D action interpreter. Parse the user natural language input into JSON:"
+
+    user_prompt = f"""
     User input: {state['user_input']}
     Output format:
     {{"character": "...", "action_type": "...", "weapon_id": "...", "target_id": "...", "is_critical_hit": true/false, "using_feat": [...]}}
     If no match, return null."""
-
-    response = llm.invoke([SystemMessage(content=prompt)])
+    
+    message = [SystemMessage(content=prompt)] + [HumanMessage(user_prompt)]
+    response = llm.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
 
-    state["parsed_action"] = cleaned_response
-    return state
+    return {
+        "messages": message + [response],
+        "parsed_action": cleaned_response
+        }
 
 
 # --------- CHARACTER LOADER NODE --------- #
@@ -132,44 +149,50 @@ def calculate_damage(state: CombatState) -> CombatState:
     # Should return a json
     # weapon = char["inventory"][action["weapon_id"]]
     weapon = {"damage": ["2d6", "2d6"], "type": "slashing", "magic_bonus": 1}
-    
-    prompt = f"""Roll resultant die for {char_id} given the following information:
-    {char_id} action: {action}
-    weapon/spell json: {weapon}
-    {char_id} attributes: {char}
-    {char_id} status: {status}
-    is_crit: {is_crit}
-
-    Output in json format:
-    {{"total_damage": int, 
+    sys_prompt = '''You are a knowledgeable DnD DM tasked with calculating damage or healing rolls. 
+    You will be provided json-formatted parameters determining who is attacking / healing and with what along with features, stats, etc.
+    Roll the resultant die and calculate the total damage / healing of the action given the parameters.
+    Then return the damage-type breakdown in json format:
+    {"total_damage": int, 
      "breakdown": json,
-     "notes": str}}
-     """
+     "notes": str}
+    '''
 
-    response = llm.invoke([SystemMessage(content=prompt)])
+    user_prompt = f"""DnD action context:
+    Action: {action}
+    weapon/spell json: {weapon}
+    Character attributes: {char}
+    Character status: {status}
+    is_crit: {is_crit}"""
+
+    message = [SystemMessage(content=sys_prompt)] + [HumanMessage(user_prompt)]
+    response = llm.invoke(message)
     # TODO: Get AI message from this tool call. response content is empty
-    print("calculate_damage", response)
+    # print("calculate_damage", response)
+    # response.pretty_print()
 
-    cleaned_response = extract_json(response.content) if "{" in response.content else None
+    # cleaned_response = extract_json(response.content) if "{" in response.content else None
 
-    state["damage_report"] = cleaned_response
-    return state
+    # state["damage_report"] = cleaned_response
+    # return state
+    return {"messages": message + [response]}
 
 
 # --------- OUTPUT NODE --------- #
 def narrator_output(state: CombatState) -> CombatState:
-    char_name = state["character"]
-    dmg = state["damage_report"]
+    # char_name = state["character"]
+    # dmg = state["damage_report"]
     # desc = f"{char_name} hits for {dmg['total_damage']} damage! ({', '.join(f'{k}: {v}' for k,v in dmg['breakdown'].items())})"
     # state["log"].append(desc)
     # print("🧙 " + desc)
-    print("🧙 " + dmg)
+    # print("🧙 " + dmg)
     return state
 
 
 # --------- BUILD LANGGRAPH --------- #
 graph = StateGraph(CombatState)
-graph.add_node("assistant", assistant)
+# graph.add_node("assistant", assistant)
+graph.add_node("is_relevant_query", is_relevant_query)
 graph.add_node("roll_dice", ToolNode(tools))
 graph.add_node("parse_action", parse_action)
 graph.add_node("load_character", load_character)
@@ -177,20 +200,22 @@ graph.add_node("load_status", load_status)
 graph.add_node("calculate_damage", calculate_damage)
 graph.add_node("narrate", narrator_output)
 
-graph.set_entry_point("assistant")
-graph.add_edge("assistant", "parse_action")
-# graph.add_edge("assistant", END)
+graph.set_entry_point("is_relevant_query")
 graph.add_conditional_edges(
-    "assistant",
+    "is_relevant_query",
     decide_relevance,
     {
         "parse_action": "parse_action",
         "end": END
     }
 )
+graph.add_edge("is_relevant_query", "parse_action")
+
 graph.add_edge("parse_action", "load_character")
 graph.add_edge("load_character", "load_status")
 graph.add_edge("load_status", "calculate_damage")
+# graph.add_edge("calculate_damage", "assistant")
+
 graph.add_edge("roll_dice", "calculate_damage")
 graph.add_conditional_edges(
     "calculate_damage",
@@ -199,10 +224,10 @@ graph.add_conditional_edges(
     tools_condition,
     {
         'tools': 'roll_dice',
-        END: 'narrate'
+        END: END
     }
 )
-graph.add_edge("narrate", END)
+# graph.add_edge("narrate", END)
 
 
 # --------- COMPILE AND RUN --------- #
@@ -224,4 +249,7 @@ if __name__ == "__main__":
         "log": []
         },
         config)
+    
+    for m in result['messages']:
+        m.pretty_print()
     
