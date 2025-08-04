@@ -47,7 +47,7 @@ The player will provide a piece of action dialogue containing who is attacking a
 You are to calculate the total damage of the action and provide the damage-type breakdown based on provided json-formatted parameters (features, weapon, stats, etc) that determine the damage.'''
 def assistant(state: CombatState):
     return {"messages": [SystemMessage(content=sys_msg)] + 
-            [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+            [llm.invoke([sys_msg] + state["messages"])]}
 
 # A router that determines the relevancy of the user input
 # and decides whether to calculate dmg or not
@@ -108,7 +108,7 @@ def load_character(state: CombatState) -> CombatState:
             "features": ["Savage Attacks", "Great Weapon Master"],
             "inventory": {
                 "Flametongue Greatsword": {
-                    "damage": ["2d6", "2d6"],
+                    "damage": {"slashing": "2d6", "fire": "2d6"},
                     "type": "slashing",
                     "magic_bonus": 1
                 }
@@ -148,10 +148,18 @@ def calculate_damage(state: CombatState) -> CombatState:
     # But the char["inventory"] json has a name attr w/ Flametongue Greatsword
     # Should return a json
     # weapon = char["inventory"][action["weapon_id"]]
-    weapon = {"damage": ["2d6", "2d6"], "type": "slashing", "magic_bonus": 1}
-    sys_prompt = '''You are a knowledgeable DnD DM tasked with calculating damage or healing rolls. 
+    weapon = {"damage": {"slashing": "2d6", "fire": "2d6"},
+              "type": "slashing",
+              "magic_bonus": 1
+              }
+    sys_prompt = '''
+    You are a knowledgeable DnD DM tasked with calculating damage or healing rolls. You have access to the following tools:
+    {tools}
+
     You will be provided json-formatted parameters determining who is attacking / healing and with what along with features, stats, etc.
-    Roll the resultant die and calculate the total damage / healing of the action given the parameters.
+    
+    Action: Roll the resultant die using [{roll_dice}] to calculate the total damage / healing of the action given the parameters.
+    
     Then return the damage-type breakdown in json format:
     {"total_damage": int, 
      "breakdown": json,
@@ -165,17 +173,7 @@ def calculate_damage(state: CombatState) -> CombatState:
     Character status: {status}
     is_crit: {is_crit}"""
 
-    message = [SystemMessage(content=sys_prompt)] + [HumanMessage(user_prompt)]
-    response = llm.invoke(message)
-    # TODO: Get AI message from this tool call. response content is empty
-    # print("calculate_damage", response)
-    # response.pretty_print()
-
-    # cleaned_response = extract_json(response.content) if "{" in response.content else None
-
-    # state["damage_report"] = cleaned_response
-    # return state
-    return {"messages": message + [response]}
+    return {"messages": [llm_with_tools.invoke([SystemMessage(content=sys_prompt)] + [HumanMessage(user_prompt)] + state["messages"])]}
 
 
 # --------- OUTPUT NODE --------- #
@@ -215,8 +213,6 @@ graph.add_edge("parse_action", "load_character")
 graph.add_edge("load_character", "load_status")
 graph.add_edge("load_status", "calculate_damage")
 # graph.add_edge("calculate_damage", "assistant")
-
-graph.add_edge("roll_dice", "calculate_damage")
 graph.add_conditional_edges(
     "calculate_damage",
     # If the latest message (result) from assistant is a tool call -> tools_condition routes to tools
@@ -227,7 +223,7 @@ graph.add_conditional_edges(
         END: END
     }
 )
-# graph.add_edge("narrate", END)
+graph.add_edge("roll_dice", "calculate_damage")
 
 
 # --------- COMPILE AND RUN --------- #
@@ -243,7 +239,7 @@ if __name__ == "__main__":
 
     # user_input = input("🎲 Describe your attack: ")
 
-    user_input = 'Avantor attacks with his greatsword'
+    user_input = 'Avantor attacks the goblin with his greatsword'
     result = app.invoke({
         "user_input": user_input,
         "log": []

@@ -9,10 +9,12 @@ from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import torch
 import numpy as np
 import json
+import math
+
 
 
 # --------- TOOL: Dice Roller --------- #
-def roll_dice(dice_expr: str) -> int:
+def roll_dice_(dice_expr: str) -> int:
     """Rolls dice plus modifier in the following format:
     ndm+x where n is the number of dice, m is the number of sides the dice have, and x is the modifier
     Ex: 2d6+3 => Roll 2 6-sided die and then add 3 to the total [2,6,+3]
@@ -28,6 +30,56 @@ def roll_dice(dice_expr: str) -> int:
     mod = int(match.group(3)) if match.group(3) else 0
     return sum(random.randint(1, die) for _ in range(num)) + mod
 
+def roll_dice(num_dice: int, num_sides: int, modifier: int) -> int:
+    """Rolls random set of dice and then adds modifier
+
+    Args:
+        num_dice: number of dice to roll
+        num_sides: number of sides on dice
+        modifier: add to the result after die roll
+    """
+    dice_rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
+    return sum(dice_rolls) + modifier
+
+def multiply(a: int, b: int) -> int:
+    """Multiply a and b.
+
+    Args:
+        a: first int
+        b: second int
+    """
+    return a * b
+
+# This will be a tool
+def add(a: int, b: int) -> int:
+    """Adds a and b.
+
+    Args:
+        a: first int
+        b: second int
+    """
+    return a + b
+
+
+# This will be a tool
+def subtract(a: int, b: int) -> int:
+    """Adds a and b.
+
+    Args:
+        a: first int
+        b: second int
+    """
+    return a - b
+
+
+def divide(a: int, b: int) -> int:
+    """Divide a and b.
+
+    Args:
+        a: first int
+        b: second int
+    """
+    return math.ceil(a / b)
 
 # Adding json cleanup
 def extract_json(text:str) -> dict:
