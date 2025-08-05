@@ -1,0 +1,23 @@
+{
+    "Avantor": {
+        "type": "character",
+        "class": ["Wizard"],
+        "subclass": "Blade-signing",
+        "race": "Half-Elf",
+        "level": "10",
+        "attributes": {"strength": 18},
+        "features": ["Savage Attacks", "Great Weapon Master"],
+        "inventory": ["Flametongue Greatsword"]
+    },
+
+    "Generic": {
+        "type": "character",
+        "class": ["Fighter"],
+        "subclass": "",
+        "level": "",
+        "race": "human",
+        "attributes": {},
+        "features": [],
+        "inventory": []
+    }
+}

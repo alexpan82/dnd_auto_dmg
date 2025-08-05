@@ -139,10 +139,10 @@ def calculate_damage(state: CombatState) -> CombatState:
               "magic_bonus": 1
               }
     sys_prompt = '''
-    You are a knowledgeable DnD DM tasked with calculating damage or healing rolls. You have access to the following tools:
+    You are a knowledgeable DnD (version 5e) DM tasked with accurately calculating damage / healing rolls. You have access to the following tools:
     {tools}
 
-    You will be provided json-formatted parameters determining who is attacking / healing and with what along with features, stats, etc.
+    You will be provided json-formatted parameters determining who is attacking / healing and with what along with relevant features, stats, etc.
     
     Action: Roll the resultant die using [{roll_dice}] to calculate the total damage / healing of the action given the parameters.
     

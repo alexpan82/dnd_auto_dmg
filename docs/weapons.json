@@ -1,0 +1,7 @@
+{
+    "Flametongue Greatsword": {
+        "damage": {"slashing": "2d6", "fire": "2d6"},
+        "type": "slashing",
+        "magic_bonus": 1
+            }
+}
