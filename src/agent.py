@@ -44,6 +44,8 @@ class CombatState(TypedDict):
 # A router that determines the relevancy of the user input
 # and decides whether to calculate dmg or not
 def is_relevant_query(state: CombatState) -> CombatState:
+    print('Deciding relevance...')
+
     prompt = """Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
     """
     user_prompt = f"""Content: 
@@ -73,13 +75,18 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
 # TODO: Consider how to heal / get temp hp
 def parse_action(state: CombatState) -> CombatState:
     # Ask the LLM to extract structured action info
-    prompt = "You are a D&D action interpreter. Parse the user natural language input into JSON:"
+    print('Parsing action...')
+
+    prompt = """You are a D&D action interpreter. Parse the user natural language input into JSON.
+    Take note of the current character performing the action, the type of action, the spell or weapon they are using (weapon_id), if the prompt contains a "crit" (critical hit) reference, and if they activate / are using a feature.
+    Output format:
+    {{"character": "...", "action_type": "attack" or "heal" or "other", "weapon_id": "...", "target_id": "..." or "self" or "" if none, "is_critical_hit": true or false, "using_feat": [...]}}
+    If no match, return null.
+    """
 
     user_prompt = f"""
     User input: {state['user_input']}
-    Output format:
-    {{"character": "...", "action_type": "...", "weapon_id": "...", "target_id": "...", "is_critical_hit": true/false, "using_feat": [...]}}
-    If no match, return null."""
+    """
     
     message = [SystemMessage(content=prompt)] + [HumanMessage(user_prompt)]
     response = llm.invoke(message)
@@ -93,6 +100,8 @@ def parse_action(state: CombatState) -> CombatState:
 
 # --------- CHARACTER LOADER NODE --------- #
 def load_attributes(state: CombatState) -> CombatState:
+    print('Matching and loading relevant JSON attributes...')
+
     # Mock character data
     char_db = {
         "Avantor": {
@@ -120,9 +129,9 @@ def load_attributes(state: CombatState) -> CombatState:
     return state
 
 # --------- DAMAGE CALCULATOR NODE --------- #
-# TODO: Make this a react agent call rather than rely on a for-loop
-# to roll for damage for each dmg type
 def calculate_damage(state: CombatState) -> CombatState:
+    print('Rolling damage 🎲 ...')
+
     char = state["character"]
     char_id = state["character_id"]
     action = state["parsed_action"]
@@ -148,6 +157,7 @@ def calculate_damage(state: CombatState) -> CombatState:
     
     Then return the damage-type breakdown in json format:
     {"total_damage": int, 
+     "total_heal": int, 
      "breakdown": json,
      "notes": str}
     '''
@@ -179,7 +189,7 @@ graph.add_node("roll_dice", ToolNode(tools))
 graph.add_node("parse_action", parse_action)
 graph.add_node("load_attributes", load_attributes)
 graph.add_node("calculate_damage", calculate_damage)
-graph.add_node("narrate", narrator_output)
+# graph.add_node("narrate", narrator_output)
 
 graph.set_entry_point("is_relevant_query")
 graph.add_conditional_edges(
@@ -221,7 +231,8 @@ if __name__ == "__main__":
 
     # user_input = input("🎲 Describe your attack: ")
 
-    user_input = 'Avantor attacks the goblin with his greatsword'
+    # user_input = 'Avantor attacks the goblin with his greatsword'
+    user_input = 'Avantor casts fireball at the goblin'
     result = app.invoke({
         "user_input": user_input,
         "log": []
