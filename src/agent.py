@@ -11,6 +11,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from typing import Annotated, Sequence
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 
 # -------- Set up OpenAI Key and Model -------- #
@@ -70,11 +72,6 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
 
 
 # --------- PARSER NODE --------- #
-# TODO: We should load the character and target prior to this node
-# So it's obvious to the LLM how to create the action json
-# Consider giving the LLM the choice to choose who are the 
-# target(s) given the keys of a json file
-# TODO: Consider how to heal / get temp hp
 def parse_action(state: CombatState) -> CombatState:
     # Ask the LLM to extract structured action info
     print('Parsing action...')
@@ -93,7 +90,9 @@ def parse_action(state: CombatState) -> CombatState:
     message = [SystemMessage(content=prompt)] + [msg for msg in state["messages"] if msg.type == 'human']
     response = llm.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
-    print(response.content)
+    
+    # print(response.content)
+    
     return {
         "messages": message + [response],
         "parsed_action": cleaned_response
@@ -101,6 +100,7 @@ def parse_action(state: CombatState) -> CombatState:
 
 
 # --------- CHARACTER LOADER NODE --------- #
+# TODO: Implement fuzzy matching here
 def load_attributes(state: CombatState) -> CombatState:
     print('Matching and loading relevant JSON attributes...')
 
@@ -221,7 +221,9 @@ graph.add_edge("roll_dice", "calculate_damage")
 
 
 # --------- COMPILE AND RUN --------- #
-memory = MemorySaver()
+# memory = MemorySaver()
+conn = sqlite3.connect("test_checkpoints.sqlite", check_same_thread=False)
+memory = SqliteSaver(conn)
 app = graph.compile(checkpointer=memory)
 
 
@@ -231,7 +233,6 @@ if __name__ == "__main__":
     
     app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
 
-    # user_input = input("🎲 Describe your attack: ")
     user_input = [HumanMessage(content="Avantor attacks the goblin with his greatsword")]
     result = app.invoke({
         "messages": user_input,
@@ -239,10 +240,11 @@ if __name__ == "__main__":
         },
         config)
     
-    for m in result['messages']:
-        m.pretty_print()
-    
     result = app.invoke({"messages": [HumanMessage(content="They do it again")]},
                         config)
+    
     for m in result['messages']:
         m.pretty_print()
+
+
+
