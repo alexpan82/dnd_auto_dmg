@@ -45,18 +45,20 @@ class CombatState(TypedDict):
 # and decides whether to calculate dmg or not
 def is_relevant_query(state: CombatState) -> CombatState:
     print('Deciding relevance...')
+    last_user_prompt = state['messages'][-1]
 
     prompt = """Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
     """
     user_prompt = f"""Content: 
-    {state['user_input']}"""
+    {last_user_prompt}"""
 
     message = [SystemMessage(content=prompt)] + [HumanMessage(user_prompt)]
     response = llm.invoke(message)
 
     return {
         "messages": message + [response],
-        "relevant_query": response.content.lower()
+        "relevant_query": response.content.lower(),
+        "user_input": last_user_prompt
     }
 
 
@@ -88,10 +90,10 @@ def parse_action(state: CombatState) -> CombatState:
     User input: {state['user_input']}
     """
     
-    message = [SystemMessage(content=prompt)] + [HumanMessage(user_prompt)]
+    message = [SystemMessage(content=prompt)] + [msg for msg in state["messages"] if msg.type == 'human']
     response = llm.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
-
+    print(response.content)
     return {
         "messages": message + [response],
         "parsed_action": cleaned_response
@@ -230,11 +232,9 @@ if __name__ == "__main__":
     app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
 
     # user_input = input("🎲 Describe your attack: ")
-
-    # user_input = 'Avantor attacks the goblin with his greatsword'
-    user_input = 'Avantor casts fireball at the goblin'
+    user_input = [HumanMessage(content="Avantor attacks the goblin with his greatsword")]
     result = app.invoke({
-        "user_input": user_input,
+        "messages": user_input,
         "log": []
         },
         config)
@@ -242,3 +242,7 @@ if __name__ == "__main__":
     for m in result['messages']:
         m.pretty_print()
     
+    result = app.invoke({"messages": [HumanMessage(content="They do it again")]},
+                        config)
+    for m in result['messages']:
+        m.pretty_print()
