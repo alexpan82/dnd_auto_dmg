@@ -75,23 +75,28 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
 def parse_action(state: CombatState) -> CombatState:
     # Ask the LLM to extract structured action info
     print('Parsing action...')
+    chat_history = [msg.content for msg in state["messages"] if msg.type == 'human']
+    chat_history = chat_history[:-1] # Get all previous queries
+    
+    # Only look back 2 messages
+    if len(chat_history) >= 2:
+        chat_history = chat_history[-2:]
 
-    prompt = """You are a D&D action interpreter. Parse the user natural language input into JSON.
+    prompt = f"""You are a D&D action interpreter. Parse the user natural language input into JSON.
     Take note of the current character performing the action, the type of action, the spell or weapon they are using (weapon_id), if the prompt contains a "crit" (critical hit) reference, and if they activate / are using a feature.
     Output format:
     {{"character": "...", "action_type": "attack" or "heal" or "other", "weapon_id": "...", "target_id": "..." or "self" or "" if none, "is_critical_hit": true or false, "using_feat": [...]}}
     If no match, return null.
+    Query history:
+    {chat_history}
+
+    Current query:
+    {state['user_input']}
     """
 
-    user_prompt = f"""
-    User input: {state['user_input']}
-    """
-    
-    message = [SystemMessage(content=prompt)] + [msg.content for msg in state["messages"] if msg.type == 'human']
+    message = [SystemMessage(content=prompt)]
     response = llm.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
-    
-    # print(response.content)
     
     return {
         "messages": message + [response],
@@ -171,7 +176,7 @@ def calculate_damage(state: CombatState) -> CombatState:
     Character status: {status}
     is_crit: {is_crit}"""
 
-    return {"messages": [llm_with_tools.invoke([SystemMessage(content=sys_prompt)] + [HumanMessage(user_prompt)] + state["messages"])]}
+    return {"messages": [llm_with_tools.invoke([SystemMessage(content=sys_prompt)] + [SystemMessage(user_prompt)] + state["messages"])]}
 
 
 # --------- OUTPUT NODE --------- #
