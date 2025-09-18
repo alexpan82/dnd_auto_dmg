@@ -1,13 +1,12 @@
 import os, getpass
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langgraph.graph import StateGraph, END
 from langchain.schema import SystemMessage
 from typing import TypedDict, Optional, List, Dict, Any, Literal
 from tools import roll_dice, extract_json, add, subtract, multiply, divide, fuzzy_match
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import Annotated, Sequence
-from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -54,30 +53,16 @@ class CombatState(TypedDict):
 # and decides whether to calculate dmg or not
 def is_relevant_query(state: CombatState) -> CombatState:
     print('Deciding relevance...')
-    last_user_prompt = state['messages'][-1].content
-    
-    chat_history = [msg.content for msg in state["messages"] if msg.type == 'human']
-    chat_history = chat_history[:-1] # Get all previous queries
-    
-    # Only look back 2 messages
-    if len(chat_history) >= 2:
-        chat_history = chat_history[-2:]
 
-    prompt = f"""Is the following content a DnD-related combat or action dialogue given the query history context? Simply answer with only "Yes" or "No"
-    Query history:
-    {chat_history}
-    
-    Current query: 
-    {last_user_prompt}
+    prompt = f"""Is the previous user query a DnD-related combat or action dialogue given the query history context? Simply answer with only "Yes" or "No"
     """
 
-    message = [SystemMessage(content=prompt)]
-    response = llm.invoke(message)
+    message = state["messages"] + [HumanMessage(content=state['user_input'])] + [SystemMessage(content=prompt)]
+    response = llm_with_tools.invoke(message)
 
     return {
         "messages": message + [response],
         "relevant_query": response.content.lower(),
-        "user_input": last_user_prompt
     }
 
 
@@ -112,7 +97,7 @@ def parse_action(state: CombatState) -> CombatState:
     """
 
     message = [SystemMessage(content=prompt)]
-    response = llm.invoke(message)
+    response = llm_with_tools.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
     
     return {
@@ -134,6 +119,11 @@ def load_attributes(state: CombatState) -> CombatState:
     print('Matching and loading relevant JSON attributes...')
     metadata= {}
 
+    if state['parsed_action'] is None:
+        return {
+        "metadata": None
+        }
+
     parsed_query_json = state['parsed_action']
     
     # TODO: Make a router to end the interaction if character is not found  
@@ -153,6 +143,11 @@ def load_attributes(state: CombatState) -> CombatState:
 # --------- DAMAGE CALCULATOR NODE --------- #
 def calculate_damage(state: CombatState) -> CombatState:
     print('Rolling damage 🎲 ...')
+
+    if state['metadata'] is None:
+        return {
+        "messages": [SystemMessage(content=f"Error in parsing user query / retrieving data from JSONs")]
+        }
 
     char = state['metadata']['character_attributes']
     action = state["parsed_action"]
@@ -192,7 +187,7 @@ def narrator_output(state: CombatState) -> CombatState:
     sys_msg = ''''''
     
     return {"messages": [SystemMessage(content=sys_msg)] + 
-            [llm.invoke([sys_msg] + state["messages"])]}
+            [llm_with_tools.invoke(state["messages"] + [sys_msg] + state["messages"])]}
 
 
 
@@ -228,7 +223,8 @@ graph.add_edge("roll_dice", "calculate_damage")
 
 
 # --------- COMPILE AND RUN --------- #
-conn = sqlite3.connect("test_checkpoints.sqlite", check_same_thread=False)
+# conn = sqlite3.connect("test_checkpoints.sqlite", check_same_thread=False)
+conn = sqlite3.connect(":memory:", check_same_thread=False)
 memory = SqliteSaver(conn)
 app = graph.compile(checkpointer=memory)
 
@@ -239,15 +235,13 @@ if __name__ == "__main__":
     
     app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
 
-    user_input = [HumanMessage(content="Avantor attacks the goblin with his greatsword")]
     result = app.invoke({
-        "messages": user_input,
-        "log": []
-        },
+        "user_input": "Avantor attacks the goblin with his greatsword",
+        "log": []},
         config)
     
-    result = app.invoke({"messages": [HumanMessage(content="They do it again")]},
-                        config)
+    result = app.invoke({"user_input": "They do it again"}, config)
+    result = app.invoke({"user_input": "Literal nonsense"}, config)
     
     for m in result['messages']:
         m.pretty_print()
