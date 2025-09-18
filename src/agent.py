@@ -64,11 +64,11 @@ def is_relevant_query(state: CombatState) -> CombatState:
     }
 
 
-def decide_relevance(state: CombatState) -> Literal["parse_action", "end"]:
-    if "yes" in state['relevant_query']:
-        return "parse_action"
+def decide_relevance(state: CombatState) -> Literal["parse_action", "__end__"]:
+    if state['relevant_query'] != 'yes':
+        return "__end__"
     else:
-        return "end"
+        return "parse_action"
 
 
 # --------- PARSER NODE --------- #
@@ -201,13 +201,8 @@ graph.add_node("calculate_damage", calculate_damage)
 graph.set_entry_point("is_relevant_query")
 graph.add_conditional_edges(
     "is_relevant_query",
-    decide_relevance,
-    {
-        "parse_action": "parse_action",
-        "end": END
-    }
-)
-graph.add_edge("is_relevant_query", "parse_action")
+    decide_relevance
+    )
 
 graph.add_edge("parse_action", "load_attributes")
 graph.add_edge("load_attributes", "calculate_damage")
