@@ -126,14 +126,23 @@ def load_attributes(state: CombatState) -> CombatState:
 
     parsed_query_json = state['parsed_action']
     
-    # TODO: Make a router to end the interaction if character is not found  
+    # Find best character match
+    # End the interaction if character is not found  
     best_match, score = fuzzy_match(parsed_query_json["character"], 
                              character_json.keys())
+    if best_match is None:
+        return {
+        "metadata": None
+        }
     metadata['character_attributes'] = {best_match: character_json[best_match]}
 
+    # Find best weapon / spell / item match
+    # If no good match, leverage the in-built knowledge of the LLM
     best_match, score = fuzzy_match(parsed_query_json["weapon_id"], 
                              weapons_json.keys())
-    metadata['weapon_spell_attributes'] = {best_match: weapons_json[best_match]}
+    
+    matched_weapon = parsed_query_json["weapon_id"] if best_match is None else weapons_json[best_match]
+    metadata['weapon_spell_attributes'] = {best_match: matched_weapon}
 
     return {
         "messages": [SystemMessage(content=f"Retrieved data from JSONs:\n{metadata}")],
@@ -146,7 +155,7 @@ def calculate_damage(state: CombatState) -> CombatState:
 
     if state['metadata'] is None:
         return {
-        "messages": [SystemMessage(content=f"Error in parsing user query / retrieving data from JSONs")]
+        "messages": [SystemMessage(content=f"Error in parsing user query / retrieving key data from JSONs")]
         }
 
     char = state['metadata']['character_attributes']
@@ -241,6 +250,7 @@ if __name__ == "__main__":
         config)
     
     result = app.invoke({"user_input": "They do it again"}, config)
+    result = app.invoke({"user_input": "He then casts 5th level fireball at a group of 3 kobolds"}, config)
     result = app.invoke({"user_input": "Literal nonsense"}, config)
     
     for m in result['messages']:
