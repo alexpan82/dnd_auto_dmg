@@ -1,18 +1,17 @@
 import os, getpass
 from langchain_openai import ChatOpenAI
-from langgraph.graph import MessagesState
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langchain.schema import SystemMessage
 from typing import TypedDict, Optional, List, Dict, Any, Literal
-from langgraph.checkpoint.memory import MemorySaver
-from tools import roll_dice, extract_json, add, subtract, multiply, divide
+from tools import roll_dice, extract_json, add, subtract, multiply, divide, fuzzy_match
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import Annotated, Sequence
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
+import json
 
 
 # -------- Set up OpenAI Key and Model -------- #
@@ -27,12 +26,20 @@ tools = [roll_dice, add, subtract, multiply, divide]
 llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
 
+# -------- Import relevant files -------- #
+with open('docs/character.json', 'r') as f:
+        character_json = json.load(f)
+with open('docs/weapons.json', 'r') as f:
+        weapons_json = json.load(f)
+
+
 # -------- STATE DEFINITION -------- #
 class CombatState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     user_input: str
     parsed_action: Optional[Dict]
     character: Optional[Dict]
+    metadata: Optional[Dict]
     character_id: str
     hp: int
     status: Optional[Dict]
@@ -117,53 +124,43 @@ def parse_action(state: CombatState) -> CombatState:
 # --------- CHARACTER LOADER NODE --------- #
 # TODO: Implement fuzzy matching here
 def load_attributes(state: CombatState) -> CombatState:
+    """
+    Tries to find the corresponding characters / spells / actions / weapons
+    referenced in the user query from imported json files.
+
+    If there is a confident match, then pull that json entry into
+    calculate_damage()
+    """
     print('Matching and loading relevant JSON attributes...')
+    metadata= {}
 
-    # Mock character data
-    char_db = {
-        "Avantor": {
-            "attributes": {"strength": 18},
-            "features": ["Savage Attacks", "Great Weapon Master"],
-            "inventory": {
-                "Flametongue Greatsword": {
-                    "damage": {"slashing": "2d6", "fire": "2d6"},
-                    "type": "slashing",
-                    "magic_bonus": 1
-                }
-            }
+    parsed_query_json = state['parsed_action']
+    
+    # TODO: Make a router to end the interaction if character is not found  
+    best_match, score = fuzzy_match(parsed_query_json["character"], 
+                             character_json.keys())
+    metadata['character_attributes'] = {best_match: character_json[best_match]}
+
+    best_match, score = fuzzy_match(parsed_query_json["weapon_id"], 
+                             weapons_json.keys())
+    metadata['weapon_spell_attributes'] = {best_match: weapons_json[best_match]}
+
+    return {
+        "messages": [SystemMessage(content=f"Retrieved data from JSONs:\n{metadata}")],
+        "metadata": metadata
         }
-    }
-    char_id = state["parsed_action"]["character"]
-    state["character"] = char_db.get(char_id)
-    state["character_id"] = char_id
-
-    state["status"] = {
-        "target_id": state["parsed_action"]["target_id"],
-        "resistances": ["fire"],
-        "buffs": [],
-        "homebrew_modifiers": []
-    }
-    return state
 
 # --------- DAMAGE CALCULATOR NODE --------- #
 def calculate_damage(state: CombatState) -> CombatState:
     print('Rolling damage 🎲 ...')
 
-    char = state["character"]
-    char_id = state["character_id"]
+    char = state['metadata']['character_attributes']
     action = state["parsed_action"]
-    status = state["status"]
+    # TODO: Change state to keep track of active character statuses
+    status = None
     is_crit = action['is_critical_hit']
+    weapon = state['metadata']['weapon_spell_attributes']
 
-    # TODO: Write a fuzzy match helper for this
-    # Example: A user might say "Attack with my sword"
-    # But the char["inventory"] json has a name attr w/ Flametongue Greatsword
-    # Should return a json
-    # weapon = char["inventory"][action["weapon_id"]]
-    weapon = {"damage": {"slashing": "2d6", "fire": "2d6"},
-              "type": "slashing",
-              "magic_bonus": 1
-              }
     sys_prompt = '''
     You are a knowledgeable DnD (version 5e) DM tasked with accurately calculating damage / healing rolls. You have access to the following tools:
     {tools}
@@ -231,7 +228,6 @@ graph.add_edge("roll_dice", "calculate_damage")
 
 
 # --------- COMPILE AND RUN --------- #
-# memory = MemorySaver()
 conn = sqlite3.connect("test_checkpoints.sqlite", check_same_thread=False)
 memory = SqliteSaver(conn)
 app = graph.compile(checkpointer=memory)
