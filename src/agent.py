@@ -48,9 +48,19 @@ class CombatState(TypedDict):
 def is_relevant_query(state: CombatState) -> CombatState:
     print('Deciding relevance...')
     last_user_prompt = state['messages'][-1].content
+    
+    chat_history = [msg.content for msg in state["messages"] if msg.type == 'human']
+    chat_history = chat_history[:-1] # Get all previous queries
+    
+    # Only look back 2 messages
+    if len(chat_history) >= 2:
+        chat_history = chat_history[-2:]
 
-    prompt = f"""Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
-    Content: 
+    prompt = f"""Is the following content a DnD-related combat or action dialogue given the query history context? Simply answer with only "Yes" or "No"
+    Query history:
+    {chat_history}
+    
+    Current query: 
     {last_user_prompt}
     """
 
