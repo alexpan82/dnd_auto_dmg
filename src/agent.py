@@ -132,40 +132,35 @@ def load_attributes(state: CombatState) -> CombatState:
     calculate_damage()
     """
     print('Matching and loading relevant JSON attributes...')
+    metadata= {}
+
     parsed_query_json = state['parsed_action']
     
     # TODO: Make a router to end the interaction if character is not found  
-    state['metadata']['character_attributes'] = fuzzy_match(parsed_query_json["character"], 
-                                                            character_json.keys())
-    
-    state['metadata']['weapon_spell_attributes'] = fuzzy_match(parsed_query_json["character"], 
-                                                               character_json.keys())
+    best_match, score = fuzzy_match(parsed_query_json["character"], 
+                             character_json.keys())
+    metadata['character_attributes'] = {best_match: character_json[best_match]}
 
-    '''
-    weapon/spell json: {weapon}
-    Character attributes: {char}
-    Character status: {status}
-    '''
-    return state
+    best_match, score = fuzzy_match(parsed_query_json["weapon_id"], 
+                             weapons_json.keys())
+    metadata['weapon_spell_attributes'] = {best_match: weapons_json[best_match]}
+
+    return {
+        "messages": [SystemMessage(content=f"Retrieved data from JSONs:\n{metadata}")],
+        "metadata": metadata
+        }
 
 # --------- DAMAGE CALCULATOR NODE --------- #
 def calculate_damage(state: CombatState) -> CombatState:
     print('Rolling damage 🎲 ...')
 
-    char = state["character"]
+    char = state['metadata']['character_attributes']
     action = state["parsed_action"]
-    status = state["status"]
+    # TODO: Change state to keep track of active character statuses
+    status = None
     is_crit = action['is_critical_hit']
+    weapon = state['metadata']['weapon_spell_attributes']
 
-    # TODO: Write a fuzzy match helper for this
-    # Example: A user might say "Attack with my sword"
-    # But the char["inventory"] json has a name attr w/ Flametongue Greatsword
-    # Should return a json
-    # weapon = char["inventory"][action["weapon_id"]]
-    weapon = {"damage": {"slashing": "2d6", "fire": "2d6"},
-              "type": "slashing",
-              "magic_bonus": 1
-              }
     sys_prompt = '''
     You are a knowledgeable DnD (version 5e) DM tasked with accurately calculating damage / healing rolls. You have access to the following tools:
     {tools}

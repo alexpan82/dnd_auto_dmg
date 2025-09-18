@@ -128,7 +128,7 @@ def fuzzy_match(query:str, possible_matches:list[str]) -> tuple[str, float]:
 
     best_match = result_list[0]
 
-    if best_match[1] <= 50:
+    if best_match[1] <= 40:
         return((None, None))
     else:
         return best_match
