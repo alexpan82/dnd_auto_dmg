@@ -47,14 +47,14 @@ class CombatState(TypedDict):
 # and decides whether to calculate dmg or not
 def is_relevant_query(state: CombatState) -> CombatState:
     print('Deciding relevance...')
-    last_user_prompt = state['messages'][-1]
+    last_user_prompt = state['messages'][-1].content
 
-    prompt = """Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
+    prompt = f"""Is the following content a DnD-related combat or action dialogue? Simply answer with only "Yes" or "No"
+    Content: 
+    {last_user_prompt}
     """
-    user_prompt = f"""Content: 
-    {last_user_prompt}"""
 
-    message = [SystemMessage(content=prompt)] + [HumanMessage(user_prompt)]
+    message = [SystemMessage(content=prompt)]
     response = llm.invoke(message)
 
     return {
@@ -87,7 +87,7 @@ def parse_action(state: CombatState) -> CombatState:
     User input: {state['user_input']}
     """
     
-    message = [SystemMessage(content=prompt)] + [msg for msg in state["messages"] if msg.type == 'human']
+    message = [SystemMessage(content=prompt)] + [msg.content for msg in state["messages"] if msg.type == 'human']
     response = llm.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
     
