@@ -10,6 +10,7 @@ import torch
 import numpy as np
 import json
 import math
+from rapidfuzz import process, fuzz
 
 
 
@@ -112,6 +113,25 @@ def extract_json(text:str) -> dict:
                     return None
                 
     return None
+
+
+def fuzzy_match(query:str, possible_matches:list[str]) -> tuple[str, float]:
+    """
+    Justification: players often truncate phrases / nouns or over-complicate the description
+    Therefore we take the max b/t the partial_ratio and token_set_ratio
+    """
+    partial_ratios = [fuzz.partial_ratio(query, q) for q in possible_matches]
+    token_set_ratio = [fuzz.token_set_ratio(query, q) for q in possible_matches]
+    
+    result_list = [(q, max(a, b)) for a, b, q in zip(partial_ratios, token_set_ratio, possible_matches)]
+    result_list = sorted(result_list, key=lambda x: x[1], reverse=True)
+
+    best_match = result_list[0]
+
+    if best_match[1] <= 50:
+        return((None, None))
+    else:
+        return best_match
 
 
 # TODO: Test this!
