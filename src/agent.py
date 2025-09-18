@@ -33,6 +33,7 @@ with open('docs/weapons.json', 'r') as f:
 
 
 # -------- STATE DEFINITION -------- #
+# TODO: Allow for multiple actions in the same prompt
 class CombatState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     user_input: str
@@ -54,7 +55,9 @@ class CombatState(TypedDict):
 def is_relevant_query(state: CombatState) -> CombatState:
     print('Deciding relevance...')
 
-    prompt = f"""Is the previous user query a DnD-related combat or action dialogue given the query history context? Simply answer with only "Yes" or "No"
+    prompt = f"""Is the previous user query a DnD-related combat or action dialogue given the query history context? 
+    Simply answer with only "Yes" or "No".
+    Be permissive since DnD language has wide variance, but answer "No" to clearly irrelevant queries.
     """
 
     message = state["messages"] + [HumanMessage(content=state['user_input'])] + [SystemMessage(content=prompt)]
@@ -77,27 +80,32 @@ def decide_relevance(state: CombatState) -> Literal["parse_action", "__end__"]:
 def parse_action(state: CombatState) -> CombatState:
     # Ask the LLM to extract structured action info
     print('Parsing action...')
-    chat_history = [msg.content for msg in state["messages"] if msg.type == 'human']
+    '''chat_history = [msg.content for msg in state["messages"] if msg.type == 'human']
     chat_history = chat_history[:-1] # Get all previous queries
     
     # Only look back 2 messages
     if len(chat_history) >= 2:
-        chat_history = chat_history[-2:]
+        chat_history = chat_history[-2:]'''
 
-    prompt = f"""You are a D&D action interpreter. Parse the user natural language input into JSON.
-    Take note of the current character performing the action, the type of action, the spell or weapon they are using (weapon_id), if the prompt contains a "crit" (critical hit) reference, and if they activate / are using a feature.
+    prompt = f"""You are a knowledgeable D&D dungeon master assistant. 
+    Parse the most recent user DnD combat / action query into JSON.
+    Take note of the current character performing the action, the type of action, the spell or weapon they are using (weapon_id), if the prompt contains a "crit" (critical hit) reference, and if they activate a feature or gain/lose a status effect.
+    Look at the previous query history to determine whether the character has an active feature or status effect.
     Output format:
-    {{"character": "...", "action_type": "attack" or "heal" or "other", "weapon_id": "...", "target_id": "..." or "self" or "" if none, "is_critical_hit": true or false, "using_feat": [...]}}
-    If no match, return null.
-    Query history:
-    {chat_history}
+    {{  "character": "...", 
+        "action_type": "attack" or "heal" or "other", 
+        "weapon_id": "...", 
+        "target_id": "..." or "self" or "" if none, 
+        "is_critical_hit": true or false,
+        "active_statuses": [...]
+        "using_feat": [...]
+        }}
 
-    Current query:
-    {state['user_input']}
+    If no match, return null.
     """
 
-    message = [SystemMessage(content=prompt)]
-    response = llm_with_tools.invoke(message)
+    message = state["messages"] + [SystemMessage(content=prompt)]
+    response = llm.invoke(message)
     cleaned_response = extract_json(response.content) if "{" in response.content else None
     
     return {
@@ -245,10 +253,10 @@ if __name__ == "__main__":
     app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
 
     result = app.invoke({
-        "user_input": "Avantor attacks the goblin with his greatsword",
+        "user_input": "Avantor casts Tenser's Transformation on themself",
         "log": []},
         config)
-    
+    result = app.invoke({"user_input": "Avantor attacks the goblin with his greatsword"}, config)
     result = app.invoke({"user_input": "They do it again"}, config)
     result = app.invoke({"user_input": "He then casts 5th level fireball at a group of 3 kobolds"}, config)
     result = app.invoke({"user_input": "Literal nonsense"}, config)
