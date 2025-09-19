@@ -11,26 +11,12 @@ import numpy as np
 import json
 import math
 from rapidfuzz import process, fuzz
+from langchain_core.tools import tool
 
 
 
 # --------- TOOL: Dice Roller --------- #
-def roll_dice_(dice_expr: str) -> int:
-    """Rolls dice plus modifier in the following format:
-    ndm+x where n is the number of dice, m is the number of sides the dice have, and x is the modifier
-    Ex: 2d6+3 => Roll 2 6-sided die and then add 3 to the total [2,6,+3]
-
-    Args:
-        dice_expr: str in ndm+x format
-    """
-    match = re.fullmatch(r"(\d*)d(\d+)([+-]\d+)?", dice_expr.replace(" ", ""))
-    if not match:
-        raise ValueError(f"Invalid dice expression: {dice_expr}")
-    num = int(match.group(1)) if match.group(1) else 1
-    die = int(match.group(2))
-    mod = int(match.group(3)) if match.group(3) else 0
-    return sum(random.randint(1, die) for _ in range(num)) + mod
-
+@tool
 def roll_dice(num_dice: int, num_sides: int, modifier: int) -> int:
     """Rolls random set of dice and then adds modifier
 
@@ -42,6 +28,7 @@ def roll_dice(num_dice: int, num_sides: int, modifier: int) -> int:
     dice_rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
     return sum(dice_rolls) + modifier
 
+@tool
 def multiply(a: int, b: int) -> int:
     """Multiply a and b.
 
@@ -51,7 +38,7 @@ def multiply(a: int, b: int) -> int:
     """
     return a * b
 
-# This will be a tool
+@tool
 def add(a: int, b: int) -> int:
     """Adds a and b.
 
@@ -61,8 +48,7 @@ def add(a: int, b: int) -> int:
     """
     return a + b
 
-
-# This will be a tool
+@tool
 def subtract(a: int, b: int) -> int:
     """Adds a and b.
 
@@ -72,7 +58,7 @@ def subtract(a: int, b: int) -> int:
     """
     return a - b
 
-
+@tool
 def divide(a: int, b: int) -> int:
     """Divide a and b.
 
