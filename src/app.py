@@ -1,4 +1,4 @@
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
 import chainlit as cl
 from dotenv import load_dotenv
@@ -42,7 +42,8 @@ async def on_message(msg: cl.Message):
         if (
             msg.content
             and not isinstance(msg, HumanMessage)
-            # and metadata["langgraph_node"] == "final"
+            and not isinstance(msg, SystemMessage)
+            and metadata["langgraph_node"] == "calculate_damage"
         ):
             await final_answer.stream_token(msg.content)
 

@@ -178,11 +178,16 @@ def calculate_damage(state: CombatState) -> CombatState:
     
     Action: Roll the resultant die using [{roll_dice}] to calculate the total damage / healing of the action given the parameters.
     
-    Then return the damage-type breakdown in json format:
+    Then return the damage-type breakdown in json format wrapped in a markdown code block.
+    Finally write a description for the actions you took and reasoning.
+
+    ```
     {"total_damage": int, 
      "total_heal": int, 
-     "breakdown": json,
-     "notes": str}
+     "breakdown": json}
+    ```
+
+    Description:
     '''
 
     user_prompt = f"""DnD action context:
