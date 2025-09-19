@@ -10,7 +10,7 @@ if __name__ == "__main__":
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     memory = SqliteSaver(conn)
     app = graph.compile(checkpointer=memory)
-    app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
+    app.get_graph().draw_mermaid_png(output_file_path='public/graph.png')
 
     # Specify a thread
     config = {"configurable": {"thread_id": "1"}}
