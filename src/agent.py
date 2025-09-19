@@ -8,8 +8,6 @@ from tools import roll_dice, extract_json, add, subtract, multiply, divide, fuzz
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import Annotated, Sequence
 from langgraph.graph.message import add_messages
-import sqlite3
-from langgraph.checkpoint.sqlite import SqliteSaver
 import json
 
 
@@ -35,18 +33,17 @@ with open('docs/weapons.json', 'r') as f:
 # -------- STATE DEFINITION -------- #
 # TODO: Allow for multiple actions in the same prompt
 class CombatState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    user_input: str
-    parsed_action: Optional[Dict]
-    character: Optional[Dict]
+    messages: Annotated[Sequence[BaseMessage], add_messages] = None
+    parsed_action: Optional[Dict] = None
+    character: Optional[Dict] = None
     metadata: Optional[Dict]
-    character_id: str
-    hp: int
-    status: Optional[Dict]
-    target: Optional[Dict]
-    damage_report: Optional[Dict]
-    log: List[str]
-    relevant_query: str
+    character_id: str = None
+    hp: int = None
+    status: Optional[Dict] = None
+    target: Optional[Dict] = None
+    damage_report: Optional[Dict] = None
+    log: List[str] = None
+    relevant_query: str = None
 
 
 # --------- RELEVANCE ROUTER --------- #
@@ -60,7 +57,7 @@ def is_relevant_query(state: CombatState) -> CombatState:
     Be permissive since DnD language has wide variance, but answer "No" to clearly irrelevant queries.
     """
 
-    message = state["messages"] + [HumanMessage(content=state['user_input'])] + [SystemMessage(content=prompt)]
+    message = state["messages"] + [SystemMessage(content=prompt)]
     response = llm_with_tools.invoke(message)
 
     return {
@@ -140,8 +137,10 @@ def load_attributes(state: CombatState) -> CombatState:
                              character_json.keys())
     if best_match is None:
         return {
-        "metadata": None
+        "metadata": None,
+        'character': None
         }
+    character = best_match
     metadata['character_attributes'] = {best_match: character_json[best_match]}
 
     # Find best weapon / spell / item match
@@ -153,6 +152,7 @@ def load_attributes(state: CombatState) -> CombatState:
     metadata['weapon_spell_attributes'] = {best_match: matched_weapon}
 
     return {
+        "character": character,
         "messages": [SystemMessage(content=f"Retrieved data from JSONs:\n{metadata}")],
         "metadata": metadata
         }
@@ -181,11 +181,16 @@ def calculate_damage(state: CombatState) -> CombatState:
     
     Action: Roll the resultant die using [{roll_dice}] to calculate the total damage / healing of the action given the parameters.
     
-    Then return the damage-type breakdown in json format:
+    Then return the damage-type breakdown in json format wrapped in a markdown code block.
+    Finally write a description for the actions you took and reasoning.
+
+    ```
     {"total_damage": int, 
      "total_heal": int, 
-     "breakdown": json,
-     "notes": str}
+     "breakdown": json}
+    ```
+
+    Description:
     '''
 
     user_prompt = f"""DnD action context:
@@ -209,60 +214,35 @@ def narrator_output(state: CombatState) -> CombatState:
 
 
 # --------- BUILD LANGGRAPH --------- #
-graph = StateGraph(CombatState)
-graph.add_node("is_relevant_query", is_relevant_query)
-graph.add_node("roll_dice", ToolNode(tools))
-graph.add_node("parse_action", parse_action)
-graph.add_node("load_attributes", load_attributes)
-graph.add_node("calculate_damage", calculate_damage)
-# graph.add_node("narrate", narrator_output)
+def build_graph():
+    graph = StateGraph(CombatState)
+    graph.add_node("is_relevant_query", is_relevant_query)
+    graph.add_node("roll_dice", ToolNode(tools))
+    graph.add_node("parse_action", parse_action)
+    graph.add_node("load_attributes", load_attributes)
+    graph.add_node("calculate_damage", calculate_damage)
+    # graph.add_node("narrate", narrator_output)
 
-graph.set_entry_point("is_relevant_query")
-graph.add_conditional_edges(
-    "is_relevant_query",
-    decide_relevance
+    graph.set_entry_point("is_relevant_query")
+    graph.add_conditional_edges(
+        "is_relevant_query",
+        decide_relevance
+        )
+
+    graph.add_edge("parse_action", "load_attributes")
+    graph.add_edge("load_attributes", "calculate_damage")
+    # graph.add_edge("calculate_damage", "assistant")
+    graph.add_conditional_edges(
+        "calculate_damage",
+        # If the latest message (result) from assistant is a tool call -> tools_condition routes to tools
+        # If the latest message (result) from assistant is a not a tool call -> tools_condition routes to END
+        tools_condition,
+        {
+            'tools': 'roll_dice',
+            END: END
+        }
     )
+    graph.add_edge("roll_dice", "calculate_damage")
 
-graph.add_edge("parse_action", "load_attributes")
-graph.add_edge("load_attributes", "calculate_damage")
-# graph.add_edge("calculate_damage", "assistant")
-graph.add_conditional_edges(
-    "calculate_damage",
-    # If the latest message (result) from assistant is a tool call -> tools_condition routes to tools
-    # If the latest message (result) from assistant is a not a tool call -> tools_condition routes to END
-    tools_condition,
-    {
-        'tools': 'roll_dice',
-        END: END
-    }
-)
-graph.add_edge("roll_dice", "calculate_damage")
-
-
-# --------- COMPILE AND RUN --------- #
-# conn = sqlite3.connect("test_checkpoints.sqlite", check_same_thread=False)
-conn = sqlite3.connect(":memory:", check_same_thread=False)
-memory = SqliteSaver(conn)
-app = graph.compile(checkpointer=memory)
-
-
-if __name__ == "__main__":
-    # Specify a thread
-    config = {"configurable": {"thread_id": "1"}}
-    
-    app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
-
-    result = app.invoke({
-        "user_input": "Avantor casts Tenser's Transformation on themself",
-        "log": []},
-        config)
-    result = app.invoke({"user_input": "Avantor attacks the goblin with his greatsword"}, config)
-    result = app.invoke({"user_input": "They do it again"}, config)
-    result = app.invoke({"user_input": "He then casts 5th level fireball at a group of 3 kobolds"}, config)
-    result = app.invoke({"user_input": "Literal nonsense"}, config)
-    
-    for m in result['messages']:
-        m.pretty_print()
-
-
+    return(graph)
 

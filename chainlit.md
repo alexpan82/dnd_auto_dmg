@@ -11,20 +11,3 @@ We present DnD-Auto-Damage (DaD), an LLM-driven agentic workflow that addresses 
 - Tool usage so that players can feel assured that a real RNG is rolling hit die
 
 ![Agent Graph](public/graph.png "Agent Graph")
-
-## Set up
-
-### Create venv and install dependencies
-```sh
-python -m venv dnd_auto_dmg
-source dnd_auto_dmg/bin/activate
-pip install -r requirements.txt
-```
-
-## Set up OpenAI Keys
-DaD uses ChatGPT-4o as the default model with support coming to different models in the future. API calls to ChatGPT generally require payment on-file and can be configured on OpenAI's API [website](https://openai.com/api/)
-
-
-### Environment variables
-
-### OpenAI Payment
