@@ -33,17 +33,17 @@ with open('docs/weapons.json', 'r') as f:
 # -------- STATE DEFINITION -------- #
 # TODO: Allow for multiple actions in the same prompt
 class CombatState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    parsed_action: Optional[Dict]
-    character: Optional[Dict]
+    messages: Annotated[Sequence[BaseMessage], add_messages] = None
+    parsed_action: Optional[Dict] = None
+    character: Optional[Dict] = None
     metadata: Optional[Dict]
-    character_id: str
-    hp: int
-    status: Optional[Dict]
-    target: Optional[Dict]
-    damage_report: Optional[Dict]
-    log: List[str]
-    relevant_query: str
+    character_id: str = None
+    hp: int = None
+    status: Optional[Dict] = None
+    target: Optional[Dict] = None
+    damage_report: Optional[Dict] = None
+    log: List[str] = None
+    relevant_query: str = None
 
 
 # --------- RELEVANCE ROUTER --------- #
