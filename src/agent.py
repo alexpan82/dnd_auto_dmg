@@ -8,8 +8,6 @@ from tools import roll_dice, extract_json, add, subtract, multiply, divide, fuzz
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import Annotated, Sequence
 from langgraph.graph.message import add_messages
-import sqlite3
-from langgraph.checkpoint.sqlite import SqliteSaver
 import json
 
 
@@ -209,60 +207,35 @@ def narrator_output(state: CombatState) -> CombatState:
 
 
 # --------- BUILD LANGGRAPH --------- #
-graph = StateGraph(CombatState)
-graph.add_node("is_relevant_query", is_relevant_query)
-graph.add_node("roll_dice", ToolNode(tools))
-graph.add_node("parse_action", parse_action)
-graph.add_node("load_attributes", load_attributes)
-graph.add_node("calculate_damage", calculate_damage)
-# graph.add_node("narrate", narrator_output)
+def build_graph():
+    graph = StateGraph(CombatState)
+    graph.add_node("is_relevant_query", is_relevant_query)
+    graph.add_node("roll_dice", ToolNode(tools))
+    graph.add_node("parse_action", parse_action)
+    graph.add_node("load_attributes", load_attributes)
+    graph.add_node("calculate_damage", calculate_damage)
+    # graph.add_node("narrate", narrator_output)
 
-graph.set_entry_point("is_relevant_query")
-graph.add_conditional_edges(
-    "is_relevant_query",
-    decide_relevance
+    graph.set_entry_point("is_relevant_query")
+    graph.add_conditional_edges(
+        "is_relevant_query",
+        decide_relevance
+        )
+
+    graph.add_edge("parse_action", "load_attributes")
+    graph.add_edge("load_attributes", "calculate_damage")
+    # graph.add_edge("calculate_damage", "assistant")
+    graph.add_conditional_edges(
+        "calculate_damage",
+        # If the latest message (result) from assistant is a tool call -> tools_condition routes to tools
+        # If the latest message (result) from assistant is a not a tool call -> tools_condition routes to END
+        tools_condition,
+        {
+            'tools': 'roll_dice',
+            END: END
+        }
     )
+    graph.add_edge("roll_dice", "calculate_damage")
 
-graph.add_edge("parse_action", "load_attributes")
-graph.add_edge("load_attributes", "calculate_damage")
-# graph.add_edge("calculate_damage", "assistant")
-graph.add_conditional_edges(
-    "calculate_damage",
-    # If the latest message (result) from assistant is a tool call -> tools_condition routes to tools
-    # If the latest message (result) from assistant is a not a tool call -> tools_condition routes to END
-    tools_condition,
-    {
-        'tools': 'roll_dice',
-        END: END
-    }
-)
-graph.add_edge("roll_dice", "calculate_damage")
-
-
-# --------- COMPILE AND RUN --------- #
-# conn = sqlite3.connect("test_checkpoints.sqlite", check_same_thread=False)
-conn = sqlite3.connect(":memory:", check_same_thread=False)
-memory = SqliteSaver(conn)
-app = graph.compile(checkpointer=memory)
-
-
-if __name__ == "__main__":
-    # Specify a thread
-    config = {"configurable": {"thread_id": "1"}}
-    
-    app.get_graph().draw_mermaid_png(output_file_path='docs/graph.png')
-
-    result = app.invoke({
-        "user_input": "Avantor casts Tenser's Transformation on themself",
-        "log": []},
-        config)
-    result = app.invoke({"user_input": "Avantor attacks the goblin with his greatsword"}, config)
-    result = app.invoke({"user_input": "They do it again"}, config)
-    result = app.invoke({"user_input": "He then casts 5th level fireball at a group of 3 kobolds"}, config)
-    result = app.invoke({"user_input": "Literal nonsense"}, config)
-    
-    for m in result['messages']:
-        m.pretty_print()
-
-
+    return(graph)
 
