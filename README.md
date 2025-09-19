@@ -10,7 +10,7 @@ We present DnD-Auto-Damage (DaD), an LLM-driven agentic workflow that addresses 
 - State persistence so that combat can pick-up where it left off
 - Tool usage so that players can feel assured that a real RNG is rolling hit die
 
-![Agent Graph](docs/graph.png "Agent Graph")
+![Agent Graph](public/graph.png "Agent Graph")
 
 ## Set up
 
