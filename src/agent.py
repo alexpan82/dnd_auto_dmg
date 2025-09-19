@@ -137,8 +137,10 @@ def load_attributes(state: CombatState) -> CombatState:
                              character_json.keys())
     if best_match is None:
         return {
-        "metadata": None
+        "metadata": None,
+        'character': None
         }
+    character = best_match
     metadata['character_attributes'] = {best_match: character_json[best_match]}
 
     # Find best weapon / spell / item match
@@ -150,6 +152,7 @@ def load_attributes(state: CombatState) -> CombatState:
     metadata['weapon_spell_attributes'] = {best_match: matched_weapon}
 
     return {
+        "character": character,
         "messages": [SystemMessage(content=f"Retrieved data from JSONs:\n{metadata}")],
         "metadata": metadata
         }
