@@ -34,7 +34,6 @@ with open('docs/weapons.json', 'r') as f:
 # TODO: Allow for multiple actions in the same prompt
 class CombatState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    user_input: str
     parsed_action: Optional[Dict]
     character: Optional[Dict]
     metadata: Optional[Dict]
@@ -58,7 +57,7 @@ def is_relevant_query(state: CombatState) -> CombatState:
     Be permissive since DnD language has wide variance, but answer "No" to clearly irrelevant queries.
     """
 
-    message = state["messages"] + [HumanMessage(content=state['user_input'])] + [SystemMessage(content=prompt)]
+    message = state["messages"] + [SystemMessage(content=prompt)]
     response = llm_with_tools.invoke(message)
 
     return {

@@ -1,6 +1,7 @@
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
 from agent import build_graph
+from langchain_core.messages import HumanMessage
 
 
 if __name__ == "__main__":
@@ -16,12 +17,12 @@ if __name__ == "__main__":
 
     # Example of user query chain
     result = app.invoke({
-        "user_input": "Avantor casts Tenser's Transformation on themself", 
+        "messages": [HumanMessage("Avantor casts Tenser's Transformation on themself")], 
         "log": []}, config)
-    result = app.invoke({"user_input": "Avantor attacks the goblin with his greatsword"}, config)
-    result = app.invoke({"user_input": "They do it again"}, config)
-    result = app.invoke({"user_input": "He then casts 5th level fireball at a group of 3 kobolds"}, config)
-    result = app.invoke({"user_input": "Literal nonsense"}, config)
+    result = app.invoke({"messages": [HumanMessage("Avantor attacks the goblin with his greatsword")]}, config)
+    result = app.invoke({"messages": [HumanMessage("They do it again")]}, config)
+    result = app.invoke({"messages": [HumanMessage("He then casts 5th level fireball at a group of 3 kobolds")]}, config)
+    result = app.invoke({"messages": [HumanMessage("Literal nonsense")]}, config)
     
     for m in result['messages']:
         m.pretty_print()
