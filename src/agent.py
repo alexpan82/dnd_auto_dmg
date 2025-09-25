@@ -161,7 +161,7 @@ def load_attributes(state: CombatState) -> CombatState:
 def calculate_damage(state: CombatState) -> CombatState:
     print('Rolling damage 🎲 ...')
 
-    if state['metadata'] is None:
+    if state['metadata'] is None or state['metadata'] is None:
         return {
         "messages": [SystemMessage(content=f"Error in parsing user query / retrieving key data from JSONs")]
         }

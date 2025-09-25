@@ -58,7 +58,9 @@ def divide(a: int, b: int) -> int:
         a: first int
         b: second int
     """
-    return math.ceil(a / b)
+    result = math.floor(a / b)
+    result = result if result > 0 else 1
+    return result
 
 # Adding json cleanup
 def extract_json(text:str) -> dict:
