@@ -17,4 +17,5 @@ torch
 pyaudio
 numpy
 chainlit
+rapidfuzz
 # wave
