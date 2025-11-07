@@ -14,17 +14,21 @@ We present DnD-Auto-Damage (DaD), an LLM-driven agentic workflow that addresses 
 
 ## Set up
 
-### Create venv and install dependencies
+### Create venv and install dependencies using uv
 ```sh
-python -m venv dnd_auto_dmg
-source dnd_auto_dmg/bin/activate
-pip install -r requirements.txt
+# First install python 3.10
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
-## Set up OpenAI Keys
-DaD uses ChatGPT-4o as the default model with support coming to different models in the future. API calls to ChatGPT generally require payment on-file and can be configured on OpenAI's API [website](https://openai.com/api/)
+### Set up API Keys
+DaD uses ChatGPT-4o as the default model with support coming to different models in the future. API calls to ChatGPT generally require payment on-file and can be configured on OpenAI's API [website](https://openai.com/api/).
 
-
-### Environment variables
-
-### OpenAI Payment
+We also provide a chat-interface using Chainlit, which requires a local key generation
+```sh
+export OPENAI_API_KEY="ENTER_YOUR_KEY"
+chainlit create-secret
+# Copy and paste key
+export CHAINLIT_AUTH_SECRET="ENTER_YOUR_KEY"
+```
