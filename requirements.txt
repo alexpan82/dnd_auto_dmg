@@ -16,4 +16,5 @@ accelerate
 torch
 pyaudio
 numpy
+chainlit
 # wave
