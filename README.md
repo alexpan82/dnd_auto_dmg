@@ -61,7 +61,7 @@ Contains character-specific attributes including stats, proficiencies, class fea
       "charisma": 8
     },
     "proficiency_bonus": 3,
-    "class": "Fighter",
+    "class": ["Fighter"],
     "level": 5,
     "features": [...],
     "additional_attributes": {...}
