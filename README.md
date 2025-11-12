@@ -35,7 +35,7 @@ export CHAINLIT_AUTH_SECRET="ENTER_YOUR_KEY"
 
 ## Usage
 ### Front-end UI
-Chatbot can be accessed via any web-browser at `http://localhost:8000` after entering the following command
+Chatbot can be accessed via any web-browser at `http://localhost:8000` after entering the following command. If prompted for a username and password, type in `admin` for both.
 ```sh
 chainlit run src/app.py
 ```
