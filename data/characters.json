@@ -1,0 +1,46 @@
+{
+    "avantor": {
+        "name": "Avantor",
+        "kind": "pc",
+        "class": ["Wizard"],
+        "subclass": "Bladesinging",
+        "race": "Half-Elf",
+        "level": 10,
+        "max_hp": 62,
+        "ac": 15,
+        "attributes": {
+            "strength": 18,
+            "dexterity": 16,
+            "constitution": 14,
+            "intelligence": 18,
+            "wisdom": 12,
+            "charisma": 10
+        },
+        "proficiency_bonus": 4,
+        "features": ["savage_attacks", "great_weapon_master"],
+        "inventory": ["flametongue_greatsword"],
+        "spells": ["fireball", "tensers_transformation"]
+    },
+    "generic": {
+        "name": "Generic",
+        "kind": "pc",
+        "class": ["Fighter"],
+        "subclass": "",
+        "race": "Human",
+        "level": 1,
+        "max_hp": 12,
+        "ac": 16,
+        "attributes": {
+            "strength": 10,
+            "dexterity": 10,
+            "constitution": 10,
+            "intelligence": 10,
+            "wisdom": 10,
+            "charisma": 10
+        },
+        "proficiency_bonus": 2,
+        "features": [],
+        "inventory": [],
+        "spells": []
+    }
+}

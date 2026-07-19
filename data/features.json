@@ -1,0 +1,12 @@
+{
+    "savage_attacks": {
+        "name": "Savage Attacks",
+        "description": "When you score a critical hit with a melee weapon attack, you can roll one of the weapon's damage dice one additional time and add it to the extra damage of the critical hit.",
+        "effect": "On a critical hit with a melee weapon: roll one additional weapon damage die and add it to the crit damage."
+    },
+    "great_weapon_master": {
+        "name": "Great Weapon Master",
+        "description": "You've learned to put the weight of a weapon to your advantage. Before you make a melee attack with a heavy weapon you are proficient with, you can choose to take a -5 penalty to the attack roll to gain +10 damage.",
+        "effect": "Optional on melee attacks with heavy weapons: -5 to hit, +10 to damage."
+    }
+}
