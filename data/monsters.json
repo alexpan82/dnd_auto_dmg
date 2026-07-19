@@ -1,0 +1,86 @@
+{
+    "kobold": {
+        "name": "Kobold",
+        "kind": "monster",
+        "max_hp": 5,
+        "ac": 12,
+        "attributes": {
+            "strength": 7,
+            "dexterity": 15,
+            "constitution": 9,
+            "intelligence": 8,
+            "wisdom": 7,
+            "charisma": 8
+        }
+    },
+    "goblin": {
+        "name": "Goblin",
+        "kind": "monster",
+        "max_hp": 7,
+        "ac": 15,
+        "attributes": {
+            "strength": 8,
+            "dexterity": 14,
+            "constitution": 10,
+            "intelligence": 10,
+            "wisdom": 8,
+            "charisma": 8
+        }
+    },
+    "skeleton": {
+        "name": "Skeleton",
+        "kind": "monster",
+        "max_hp": 13,
+        "ac": 13,
+        "attributes": {
+            "strength": 10,
+            "dexterity": 14,
+            "constitution": 15,
+            "intelligence": 6,
+            "wisdom": 8,
+            "charisma": 5
+        }
+    },
+    "zombie": {
+        "name": "Zombie",
+        "kind": "monster",
+        "max_hp": 22,
+        "ac": 8,
+        "attributes": {
+            "strength": 13,
+            "dexterity": 6,
+            "constitution": 16,
+            "intelligence": 3,
+            "wisdom": 6,
+            "charisma": 5
+        }
+    },
+    "bandit": {
+        "name": "Bandit",
+        "kind": "monster",
+        "max_hp": 11,
+        "ac": 12,
+        "attributes": {
+            "strength": 11,
+            "dexterity": 12,
+            "constitution": 12,
+            "intelligence": 10,
+            "wisdom": 10,
+            "charisma": 10
+        }
+    },
+    "wolf": {
+        "name": "Wolf",
+        "kind": "monster",
+        "max_hp": 11,
+        "ac": 13,
+        "attributes": {
+            "strength": 12,
+            "dexterity": 15,
+            "constitution": 12,
+            "intelligence": 3,
+            "wisdom": 12,
+            "charisma": 6
+        }
+    }
+}

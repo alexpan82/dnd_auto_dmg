@@ -1,0 +1,10 @@
+{
+    "flametongue_greatsword": {
+        "name": "Flametongue Greatsword",
+        "damage": {"slashing": "2d6", "fire": "2d6"},
+        "magic_bonus": 1,
+        "ability": "strength",
+        "properties": ["two-handed", "heavy"],
+        "special_effects": "While the sword is ablaze, it deals an extra 2d6 fire damage on a hit."
+    }
+}
