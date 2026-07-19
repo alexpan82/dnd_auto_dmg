@@ -7,16 +7,9 @@ langchain-community
 langchain-core
 langchain==0.3.27
 langchain-openai
-notebook
-tavily-python
-wikipedia
-trustcall
 langgraph-cli[inmem]
-transformers
-accelerate
-torch
 pyaudio
 numpy
 chainlit
 rapidfuzz
-# wave
+pydantic
