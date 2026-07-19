@@ -4,9 +4,9 @@
 > how this file is maintained). Updated by the orchestrator after every subagent completes
 > and before every pause. A cold session resumes by reading the spec + this file only.
 
-**Current phase:** C (WP3) — awaiting user go-ahead
-**Base health:** WP1+WP2 done and green (50/50 tests pass); WP1 merged to branch history as
-  PR #7; old code intact and still importing; `docs/` untouched (removed in WP7)
+**Current phase:** D (WP4a ∥ WP4b ∥ WP6-JSX) — awaiting user go-ahead
+**Base health:** WP1–WP3 done and green (69/69 tests); WP1 merged as PR #7, WP2 merged as
+  PR #8 (`bf12c3a`); old code intact; `docs/` untouched (removed in WP7)
 **Last updated:** 2026-07-19
 
 ## Phase / WP status
@@ -15,7 +15,7 @@
 |-------|----|--------|-------|
 | A | WP1 scaffolding/config/llm/tools | `done` | 23/23 tool tests pass; deps trimmed; lazy llm/config verified |
 | B | WP2 schemas/data/registry | `done` | 50/50 tests pass; registry validates real data; fireball resolves as spell |
-| C | WP3 state + serialization de-risk + conftest | `pending` | — |
+| C | WP3 state + serialization de-risk + conftest | `done` | 69/69 tests; serialization de-risk PASSED — pydantic kept in channels |
 | D | WP4a deterministic nodes | `pending` | — |
 | D | WP4b LLM nodes | `pending` | — |
 | D | WP6-JSX roster element | `pending` | — |
@@ -60,6 +60,16 @@
   inventory) so instances never share state; `combatant_from_monster(id, n)` yields id
   `"{id}_{n}"` / name `"Kobold 2"`; `adhoc_combatant` slugifies the name (fallback
   `"combatant"`), `kind="monster"`, `origin="adhoc"`; unknown ids raise `KeyError`.
+- **WP3 / SERIALIZATION DE-RISK OUTCOME (§12 risk 1): PASS — pydantic models in state
+  channels are KEPT.** Orchestrator ran a standalone experiment (2026-07-19) before any
+  state.py code was written: a minimal StateGraph with `combatants: Annotated[Dict[str,
+  Combatant], merge_combatants]` compiled with `SqliteSaver(sqlite3.connect(file))`,
+  invoked on thread t1; then a FRESH connection + fresh SqliteSaver + fresh graph over the
+  same DB file. Result: `get_state().values["combatants"]["avantor"]` re-hydrated as a
+  `Combatant` INSTANCE (not dict), nested `statuses[0]` as `StatusEffect`, and a node
+  running on the resumed thread received a real `Combatant` and successfully
+  `.model_copy(update=...)`-ed it (hp 62→52). JsonPlusSerializer handles pydantic v2 fine.
+  **No dict fallback needed** — §5's "TypedDict state, pydantic values" design stands.
 - **WP2 / data content:** Avantor migrated with invented level-10 Bladesinger stats
   (max_hp 62, ac 15, all six abilities keeping source strength 18, proficiency_bonus 4);
   "Blade-signing" typo fixed to "Bladesinging"; Fireball moved weapons→spells;
@@ -128,5 +138,35 @@
   dict-fallback decision in this ledger and implement it. `state.py` docstring must freeze
   the §9 UI props contract. `conftest.py` provides the `ScriptedChatModel` fake, registry
   fixture, tmp data dir. Await user go-ahead before starting.
+
+### WP3 — State, serialization de-risk, conftest
+- Status: `done` (implementation + verification by orchestrator; ledger completion by main
+  session after the orchestrator hit an API connection error post-verification)
+- Files touched (all NEW; no existing file modified):
+  - `src/dnd_auto_dmg/state.py` — `CombatState` TypedDict per §5 (`messages` add_messages,
+    `combatants` merge_combatants, `round_number` last-write-wins, `event_log` operator.add,
+    five per-turn scratch fields documented as begin_turn-reset); `merge_combatants` reducer
+    (per-key REPLACE, `None` deletes, delete-of-missing is silent no-op, never mutates
+    existing); module docstring freezes the §9 UI props contract verbatim.
+  - `tests/test_state.py` — 9 reducer unit tests; 2 SqliteSaver round-trip lock-in tests
+    (fresh connection/saver/graph over the same DB file re-hydrates `Combatant` +
+    nested `StatusEffect` as real instances; resumed-thread node receives a live model and
+    `.model_copy()`s it); 1 test demonstrating scratch fields persist across invokes
+    without an explicit reset (motivates begin_turn); 7 ScriptedChatModel behavior tests.
+  - `tests/conftest.py` — `ScriptedChatModel` (queued AIMessages incl. tool_calls;
+    `with_structured_output` returns pydantic objects directly; `bind_tools` shares the
+    queue; tracks calls), `make_scripted_llm` factory fixture, `app_config` fixture,
+    `registry` fixture over real `data/`, `tmp_data_dir` fixture.
+- Verification: orchestrator ran the de-risk experiment standalone (PASS — see Decisions
+  log) and reported 69/69 green + conftest importing without an API key before its
+  connection dropped; main session independently re-ran `.venv/bin/python -m pytest
+  tests/ -q` → **69 passed** and reviewed all three files against §5/§9/§10.
+- Resume notes: base is green. Next phase = **D**, three parallel Sonnet subagents:
+  **WP4a** deterministic nodes (`nodes/{__init__,begin_turn,resolve,apply}.py` +
+  `tests/test_nodes_deterministic.py`), **WP4b** LLM nodes
+  (`nodes/{relevance,parse,damage,narrate}.py` + `tests/test_nodes_llm.py`), **WP6-JSX**
+  roster element (`public/elements/LanggraphStateDisplay.jsx` only, built against the
+  frozen props contract in `state.py`). File ownership is disjoint — safe to parallelize.
+  Await user go-ahead before starting.
 
 *(add a section per WP as work begins)*
