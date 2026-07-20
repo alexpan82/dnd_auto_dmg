@@ -4,10 +4,11 @@
 > how this file is maintained). Updated by the orchestrator after every subagent completes
 > and before every pause. A cold session resumes by reading the spec + this file only.
 
-**Current phase:** E (WP5) — awaiting user go-ahead
-**Base health:** WP1–WP4a/4b/6-JSX done and green (107/107 tests); WP1–WP3 merged as
-  PRs #7/#8/#9 (`2e990b9`); Phase D work uncommitted in working tree; old code intact;
-  `docs/` untouched (removed in WP7)
+**Current phase:** F (WP6-app + WP7) — awaiting user go-ahead
+**Base health:** WP1–WP5 done and green (110/110 tests); merged through PR #10 (`da724e1`);
+  Phase E work uncommitted in working tree; old code intact except `src/demo.py` (rewritten
+  by WP5 per plan); `docs/` untouched (removed in WP7); demo live smoke deferred to user
+  (no API key in orchestrator env)
 **Last updated:** 2026-07-19
 
 ## Phase / WP status
@@ -20,7 +21,7 @@
 | D | WP4a deterministic nodes | `done` | 26 tests; resolve/apply/begin_turn per §6; advance_round consumed in resolve |
 | D | WP4b LLM nodes | `done` | 12 tests; damage prompt renders real tools, no literal placeholders |
 | D | WP6-JSX roster element | `done` | rewritten against frozen §9 contract; code-reviewed (no JSX runner) |
-| E | WP5 graph/demo/integration | `pending` | — |
+| E | WP5 graph/demo/integration | `done` | 110/110 tests; §10 scenario passes incl. termination assertion; thresholds verified, no tuning needed |
 | F | WP6-app Chainlit wiring | `pending` | — |
 | F | WP7 README + cleanup | `pending` | — |
 | G | WP8 stretch (optional) | `pending` | — |
@@ -93,6 +94,27 @@
   dispatch (eliminating the parallel-import race), WP4a filled in its three exports, and
   the orchestrator reconciled WP4b's four exports post-merge. All 7 factories now export
   from `dnd_auto_dmg.nodes`.
+- **WP5 / build_graph shape:** `build_graph(llm=None, registry=None, config=None)` returns
+  the **UNCOMPILED** `StateGraph`; callers compile with their own checkpointer (legacy
+  pattern preserved for demo.py and WP6-app). Lazy defaults: `get_llm`/`get_llm_with_tools`
+  are called ONLY when `llm is None`; an injected llm is tool-bound inside graph.py with a
+  TypeError-retry (fakes whose `bind_tools` lacks `parallel_tool_calls` still work).
+- **WP5 / route_actions event_log:** conditional edges can't write state, so the "no valid
+  actions" branch routes through a tiny inline `no_actions` node (defined in graph.py) that
+  appends "No resolvable actions this turn." then ENDs. Node names are frozen:
+  begin_turn, check_relevance, parse_actions, resolve_combatants, no_actions,
+  calculate_damage, roll_dice (ToolNode), apply_damage, narrate — `config.stream_nodes`
+  ({"calculate_damage","narrate"}) depends on these (§12 risk 6).
+- **WP5 / recursion guard:** langgraph's recursion_limit is invoke-time config, not
+  compile-time. `graph.RECURSION_LIMIT = 100` is the canonical constant; demo + integration
+  tests pass `{"recursion_limit": RECURSION_LIMIT}` on every invoke. Primary stuck-cursor
+  protection remains apply_damage's unconditional increment (unit- and integration-tested).
+- **WP5 / threshold tuning outcome (§12 risk 5): NO CHANGE NEEDED.** Verified empirically
+  with the real registry: "kobold" vs live ["goblin_1","Goblin 1","avantor","Avantor"] at
+  threshold 70 → miss (falls through to monsters.json, correct); "goblin" vs live avantor
+  → miss; "greatsword" → flametongue_greatsword at 40; "tensers transformation" and
+  "fireball" hit their spells. AppConfig defaults (40 lookup / 70 combatant) stand;
+  config.py untouched.
 - **WP2 / data content:** Avantor migrated with invented level-10 Bladesinger stats
   (max_hp 62, ac 15, all six abilities keeping source strength 18, proficiency_bonus 4);
   "Blade-signing" typo fixed to "Bladesinging"; Fireball moved weapons→spells;
@@ -280,5 +302,49 @@
   Avantor; goblin HP drops; "They do it again" reuse; 5th-level fireball kills 3 kobolds;
   nonsense → END unchanged; explicit `current_action_index == len(resolved_actions)`
   termination assertion), and demo.py printing roster HP per turn. Await user go-ahead.
+
+### WP5 — Graph, demo, integration (Phase E)
+- Status: `done`
+- Files touched:
+  - `src/dnd_auto_dmg/graph.py` (NEW) — `build_graph(llm=None, registry=None, config=None)`
+    wiring the full §6 diagram (relevance gate → parse → resolve → route_actions →
+    calculate_damage ⇄ roll_dice ToolNode loop → apply_damage cursor loop → narrate/END,
+    inline `no_actions` node, enable_narration gate); `RECURSION_LIMIT = 100`; lazy LLM
+    defaults (import + fake-injected build need no API key)
+  - `src/demo.py` (REWRITTEN — thin CLI): same five scripted turns as legacy, dead
+    `"log": []` key dropped, `draw_mermaid_png` dropped, getpass key prompt only under
+    `__main__` (§7), in-memory SqliteSaver, recursion_limit on every invoke, prints latest
+    AI message + roster (id: hp/max_hp, statuses with durations, dead/unconscious marker)
+    + round per turn, event_log tail at end
+  - `tests/test_graph_integration.py` (NEW) — 3 tests / full §10 scenario on
+    ScriptedChatModel + real registry + SqliteSaver, one thread
+- Verification (orchestrator ran directly, 2026-07-19):
+  - `.venv/bin/python -m pytest tests/ -q` → **110 passed** (107 base + 3 integration).
+  - Integration assertions confirmed by inspection: Tenser's status (10 rounds) lands on
+    Avantor; goblin_1 7→1→0 HP with `dead` status + is_alive False on the reused instance
+    ("They do it again" reuses goblin_1, roster has exactly one goblin_*); 5th-level
+    fireball kills kobold_1/2/3 (all 0/5 HP, dead); "Literal nonsense" → END with
+    combatant snapshot unchanged and scripted queue EXHAUSTED (proves no stray LLM calls);
+    explicit termination `current_action_index == len(resolved_actions)` asserted per
+    turn and in the 2-action cursor-loop test (== 2); message hygiene end-to-end (no
+    SystemMessage persisted; tool scaffolding pruned; report + narration retained);
+    no-actions route appends "No resolvable actions this turn."
+  - `env -u OPENAI_API_KEY` import of `build_graph`/`RECURSION_LIMIT` + fake-injected
+    `build_graph(llm=ScriptedChatModel(), registry=real).compile()` → clean; compiled
+    node names verified EXACTLY {begin_turn, check_relevance, parse_actions,
+    resolve_combatants, no_actions, calculate_damage, roll_dice, apply_damage, narrate}.
+  - `ast.parse(src/demo.py)` → valid; **live demo smoke NOT run — `OPENAI_API_KEY` not
+    set in orchestrator env; deferred to user** (run `.venv/bin/python src/demo.py`;
+    expect kobolds at 0 HP in the roster printout).
+  - Scripted-queue accounting (for future maintenance): turn1=4 responses, turn2=5 (incl.
+    one tool_call round), turn3=4, turn4=4, turn5=1; total 18.
+- Threshold tuning: verified, no change (see Decisions log).
+- Resume notes: next phase = **F**: WP6-app (`src/app.py` — imports from dnd_auto_dmg,
+  streaming filter `metadata["langgraph_node"] in config.stream_nodes`, props per frozen
+  §9 contract, audio/whisper path untouched at import level, manual Chainlit smoke
+  checklist) + WP7 (README/chainlit.md rewrite; DELETE `src/agent.py` + old `src/tools.py`;
+  remove `docs/`; `grep -r "docs/character" src/` must be empty). WP6-app depends on WP5
+  (done); both F items can run as parallel subagents (disjoint files) or sequentially.
+  Await user go-ahead.
 
 *(add a section per WP as work begins)*
