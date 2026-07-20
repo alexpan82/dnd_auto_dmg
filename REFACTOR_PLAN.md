@@ -385,6 +385,49 @@ Parallelism: 1 → 2 → 3 → {4a ∥ 4b ∥ 6-JSX} → 5 → {6-app ∥ 7} →
 7. **`with_structured_output` provider variance** — keep `extract_json` fallback path.
 8. Ordering: state (3) before nodes (4x) before graph (5); graph wiring last among core WPs.
 
+## 12a. WP9 — Ollama as default model (added mid-project, 2026-07-20)
+
+User decision: make **`ollama:minimax-m3:cloud`** the default chat model (replacing
+`openai:gpt-4o`), with gpt-4o still reachable via `DND_MODEL=openai:gpt-4o`. The LLM layer
+is already provider-agnostic (`init_chat_model`), so this is a config + dependency +
+entry-point change, not an architecture change. Files owned by WP9:
+`src/dnd_auto_dmg/config.py`, `src/dnd_auto_dmg/llm.py`, `src/app.py`, `src/demo.py`,
+`requirements.txt`, `pyproject.toml`, `README.md`, and a small test.
+
+Required changes and the gotchas each addresses:
+1. **`config.py`**: `_model_default()` returns `os.environ.get("DND_MODEL",
+   "ollama:minimax-m3:cloud")`. (`init_chat_model` splits provider from model on the FIRST
+   colon, so `"ollama:minimax-m3:cloud"` → provider `ollama`, model `minimax-m3:cloud` —
+   correct.)
+2. **`llm.py`**: `bind_tools(tools, parallel_tool_calls=False)` uses an OpenAI-only kwarg
+   that `ChatOllama.bind_tools` rejects. Make binding provider-robust: try with
+   `parallel_tool_calls=False`, and on `TypeError` fall back to `bind_tools(tools)`. Keep it
+   lazy (no construction-time network).
+3. **`app.py` + `demo.py`**: both currently prompt for `OPENAI_API_KEY` unconditionally.
+   Gate that prompt on the configured provider — only prompt when
+   `AppConfig().model.split(":", 1)[0] == "openai"`. Ollama cloud auth is handled by the
+   `ollama` daemon/CLI (`ollama signin`), NOT an env var this app manages, so no key prompt
+   for the ollama default. Always keep the `CHAINLIT_AUTH_SECRET` prompt in `app.py`.
+4. **Whisper caveat**: `app.py`'s speech-to-text still calls OpenAI Whisper
+   (`AsyncOpenAI().audio.transcriptions`). That is independent of the chat model. Document
+   that the OPTIONAL audio-input path needs `OPENAI_API_KEY` even when the chat model is
+   Ollama; the text path does not. Do NOT rip out the audio path.
+5. **`requirements.txt` + `pyproject.toml`**: add `langchain-ollama` so
+   `init_chat_model("ollama:...")` can construct. (`ChatOllama` construction is lazy — no
+   server ping until invoke — so `get_llm()` on the ollama default no longer raises at
+   construction the way the openai default did; that's fine and expected.)
+6. **`README.md`**: document Ollama as the default (pull/`ollama signin` for cloud models),
+   switching back via `DND_MODEL=openai:gpt-4o`, and the audio/Whisper OpenAI caveat.
+7. **Test**: assert `AppConfig().model == "ollama:minimax-m3:cloud"` (and that `DND_MODEL`
+   overrides it); optionally assert the provider parse. Do NOT add a test that requires a
+   running Ollama server. The existing 110 tests inject fakes and must stay green.
+
+Acceptance: full suite green; `env -u OPENAI_API_KEY .venv/bin/python -c "from
+dnd_auto_dmg.llm import get_llm; get_llm()"` constructs the ollama model without prompting or
+network; `DND_MODEL=openai:gpt-4o` still selects OpenAI; README/entry-point key-prompting
+matches provider. Live Ollama smoke (`python src/demo.py` with the daemon running / signed
+in) is deferred to the user.
+
 ## 13. Orchestration protocol (PM agent duties)
 
 - **Phases and pause gates** (one phase per run, then STOP and report — never continue into
@@ -396,7 +439,8 @@ Parallelism: 1 → 2 → 3 → {4a ∥ 4b ∥ 6-JSX} → 5 → {6-app ∥ 7} →
   - Phase D: WP4a ∥ WP4b ∥ WP6-JSX (parallel subagents) → pause
   - Phase E: WP5 → pause
   - Phase F: WP6-app + WP7 → pause
-  - Phase G (optional): WP8 → done
+  - Phase G1: WP9 (Ollama default, §12a) → pause
+  - Phase G2 (optional): WP8 stretch → done
 - **Ledger discipline**: update `REFACTOR_PROGRESS.md` after EVERY subagent completes and
   before every pause — status, files touched, test command + result, decisions, resume
   notes. The ledger + this spec must be sufficient for a cold session to resume.

@@ -12,7 +12,7 @@ We present DnD-Auto-Damage (DaD), an LLM-driven agentic workflow that addresses 
 - Multi-action messages ("Avantor attacks the goblin, then casts fireball at the kobolds") are parsed into individual resolved actions
 - Tool usage so that players can feel assured that a real RNG is rolling hit die
 - State persistence so that combat can pick up where it left off
-- Provider-agnostic LLM layer — defaults to `gpt-4o`, swap providers/models with a single environment variable
+- Provider-agnostic LLM layer — defaults to Ollama (`minimax-m3:cloud`), swap providers/models with a single environment variable
 - Optional turn-by-turn narration summarizing what just happened in the fight
 
 ![Agent Graph](public/graph.png "Agent Graph")
@@ -39,19 +39,35 @@ uv pip install -e ".[dev]" --python .venv/bin/python
 uv pip install -r requirements.txt
 ```
 
-### Set up API Keys
+### Set up the model
 
-DaD uses `gpt-4o` as the default model. API calls to OpenAI generally require payment on-file and can be configured on OpenAI's API [website](https://openai.com/api/).
+DaD defaults to **Ollama** (`ollama:minimax-m3:cloud`, via the `langchain-ollama` integration package already in `requirements.txt`/`pyproject.toml`) as the chat model. No API key or env var is needed for this default — install [Ollama](https://ollama.com/) and either pull a local model or sign in for cloud-hosted models like the shipped default:
 
 ```sh
+# Cloud model (e.g. the shipped default, minimax-m3:cloud): sign in once
+ollama signin
+
+# OR, for a fully local model, pull it and set DND_MODEL to match
+ollama pull llama3.1
+export DND_MODEL="ollama:llama3.1"
+```
+
+Ollama cloud auth is handled entirely by the `ollama` daemon/CLI — this app never prompts for or manages an Ollama credential.
+
+To switch back to OpenAI's `gpt-4o` (the pre-WP9 default), set `DND_MODEL` and `OPENAI_API_KEY`. API calls to OpenAI generally require payment on-file and can be configured on OpenAI's API [website](https://openai.com/api/):
+
+```sh
+export DND_MODEL="openai:gpt-4o"
 export OPENAI_API_KEY="ENTER_YOUR_KEY"
 ```
 
-To use a different provider/model, set `DND_MODEL` to an `init_chat_model`-style `"provider:model"` string (LangChain's provider-agnostic chat model constructor). This requires that provider's LangChain integration package to be installed (e.g. `langchain-anthropic` for Anthropic):
+More generally, `DND_MODEL` accepts any `init_chat_model`-style `"provider:model"` string (LangChain's provider-agnostic chat model constructor), provided that provider's LangChain integration package is installed (e.g. `langchain-anthropic` for Anthropic):
 
 ```sh
 export DND_MODEL="anthropic:claude-sonnet-4-5"
 ```
+
+**Audio-input caveat:** independent of `DND_MODEL`, the Chainlit UI's voice-input feature (`src/app.py`) transcribes audio via OpenAI Whisper (`AsyncOpenAI().audio.transcriptions`), which is constructed at import time. That means `OPENAI_API_KEY` currently must be set for `chainlit run src/app.py` to start at all — even if you never touch the mic and even when your chat model is Ollama. Typed text input itself needs no OpenAI key; the CLI demo (`src/demo.py`) has no audio path and, under the Ollama default, needs no OpenAI key either.
 
 Optionally, point the app at a different data directory (see [Customization](#customization-data) below) instead of the repo's `data/`:
 
@@ -79,7 +95,7 @@ chainlit run src/app.py
 
 ### CLI demo
 
-A scripted five-turn combat (casting a buff, attacking, fighting a group of ad-hoc kobolds, etc.) that prints the combatant roster's HP after every turn. Requires `OPENAI_API_KEY` — this makes real LLM calls.
+A scripted five-turn combat (casting a buff, attacking, fighting a group of ad-hoc kobolds, etc.) that prints the combatant roster's HP after every turn. This makes real LLM calls: with the Ollama default it needs the `ollama` daemon running (and `ollama signin` for cloud models like `minimax-m3:cloud`), no `OPENAI_API_KEY` required; with `DND_MODEL=openai:gpt-4o` it requires `OPENAI_API_KEY`.
 
 ```sh
 .venv/bin/python src/demo.py
