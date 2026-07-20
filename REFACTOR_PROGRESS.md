@@ -4,11 +4,11 @@
 > how this file is maintained). Updated by the orchestrator after every subagent completes
 > and before every pause. A cold session resumes by reading the spec + this file only.
 
-**Current phase:** F (WP6-app + WP7) — awaiting user go-ahead
-**Base health:** WP1–WP5 done and green (110/110 tests); merged through PR #10 (`da724e1`);
-  Phase E work uncommitted in working tree; old code intact except `src/demo.py` (rewritten
-  by WP5 per plan); `docs/` untouched (removed in WP7); demo live smoke deferred to user
-  (no API key in orchestrator env)
+**Current phase:** G (WP8 stretch, optional) — core refactor COMPLETE pending user's live
+  smokes (demo.py + Chainlit boot; see WP6-app/WP7 sections for the checklist)
+**Base health:** WP1–WP7 done and green (110/110 tests); merged through PR #11 (`cadb805`);
+  Phase F work uncommitted in working tree; ALL legacy code removed (src/agent.py, old
+  src/tools.py, docs/); live smokes deferred to user (no API keys in orchestrator env)
 **Last updated:** 2026-07-19
 
 ## Phase / WP status
@@ -22,8 +22,8 @@
 | D | WP4b LLM nodes | `done` | 12 tests; damage prompt renders real tools, no literal placeholders |
 | D | WP6-JSX roster element | `done` | rewritten against frozen §9 contract; code-reviewed (no JSX runner) |
 | E | WP5 graph/demo/integration | `done` | 110/110 tests; §10 scenario passes incl. termination assertion; thresholds verified, no tuning needed |
-| F | WP6-app Chainlit wiring | `pending` | — |
-| F | WP7 README + cleanup | `pending` | — |
+| F | WP6-app Chainlit wiring | `done` | streams config.stream_nodes; frozen §9 props; audio path byte-for-byte; boot smoke deferred |
+| F | WP7 README + cleanup | `done` | README/chainlit.md rewritten; agent.py + old tools.py + docs/ deleted; legacy grep empty |
 | G | WP8 stretch (optional) | `pending` | — |
 
 ## Decisions log
@@ -115,6 +115,17 @@
   → miss; "greatsword" → flametongue_greatsword at 40; "tensers transformation" and
   "fireball" hit their spells. AppConfig defaults (40 lookup / 70 combatant) stand;
   config.py untouched.
+- **WP6-app / streaming + prompting:** app.py now streams tokens from ALL of
+  `config.stream_nodes` ({"calculate_damage", "narrate"}) instead of the old hardcoded
+  `== "calculate_damage"` — narration is a user-facing stream per §6. `_set_env` (interactive
+  getpass for CHAINLIT_AUTH_SECRET / OPENAI_API_KEY) is now inlined in app.py at module
+  level (legacy `agent._set_env` was deleted with agent.py); entry-point-level prompting
+  only, per §7. Invokes carry `recursion_limit: RECURSION_LIMIT`.
+- **WP7 / legacy removal complete:** `src/agent.py`, old flat `src/tools.py`, and `docs/`
+  (all four JSONs) are DELETED. All game data lives in `data/`; all code lives in
+  `src/dnd_auto_dmg/`. Legacy-reference grep over src/ + tests/ + README + chainlit.md is
+  empty. The `public/graph.png` referenced by README/chainlit.md is the pre-refactor
+  render (stale but harmless — regenerating it requires graphviz/network; left as-is).
 - **WP2 / data content:** Avantor migrated with invented level-10 Bladesinger stats
   (max_hp 62, ac 15, all six abilities keeping source strength 18, proficiency_bonus 4);
   "Blade-signing" typo fixed to "Bladesinging"; Fireball moved weapons→spells;
@@ -346,5 +357,65 @@
   remove `docs/`; `grep -r "docs/character" src/` must be empty). WP6-app depends on WP5
   (done); both F items can run as parallel subagents (disjoint files) or sequentially.
   Await user go-ahead.
+
+### WP6-app — Chainlit wiring (Phase F, parallel)
+- Status: `done` (boot smoke deferred to user — see below)
+- Files touched: `src/app.py` (rewritten in place; ONLY file)
+- Changes vs legacy: imports from `dnd_auto_dmg.graph`/`dnd_auto_dmg.config` (no `agent`
+  import — that module is deleted); `_set_env` inlined; `config = AppConfig()` +
+  `build_graph(config=config)` + unchanged in-memory SqliteSaver compile; streaming filter
+  `metadata.get("langgraph_node") in config.stream_nodes`; invoke config renamed to
+  `config_dict` and carries `recursion_limit`; `update_state` emits the frozen §9 props
+  (combatants model_dump'd per id — with dict passthrough defensiveness, round from
+  round_number default 1, log = last 10 event_log lines, None-state safe); dead
+  commented-out on_chat_start block dropped. KEPT byte-for-byte: password auth
+  (admin/admin), on_chat_resume, starters, `openai_client = AsyncOpenAI()`, entire
+  audio/whisper path (speech_to_text, on_audio_start/chunk/end, silence constants,
+  process_audio incl. its pre-existing wav_file-after-with quirk).
+- Verification (orchestrator ran directly, 2026-07-19): `py_compile` clean; 14-point
+  shape check ALL PASS (stream_nodes filter, three props keys, round_number,
+  event_log[-10:], model_dump, RECURSION_LIMIT, no agent import, audio trio, auth,
+  starters); full suite still 110/110; compiled node names confirmed to include
+  calculate_damage + narrate (matches stream_nodes).
+- **DEFERRED: Chainlit boot smoke** — needs OPENAI_API_KEY + CHAINLIT_AUTH_SECRET, not
+  set in orchestrator env. User checklist: `chainlit run src/app.py` → login admin/admin
+  → send "Avantor attacks the goblin with his greatsword" → expect streamed damage +
+  narration text, then the roster element showing avantor + goblin_1 with HP bars/statuses
+  and the round badge; optionally start audio to confirm the whisper path still works.
+
+### WP7 — README + cleanup (Phase F, parallel)
+- Status: `done`
+- Files touched: `README.md` (full rewrite), `chainlit.md` (brief rewrite);
+  DELETED: `src/agent.py`, old flat `src/tools.py`, `docs/` (character/weapons/features/
+  spells JSONs — all previously migrated to `data/` in WP2).
+- README structure: pitch (multi-combatant tracker feature bullets, kept tone + graph.png
+  reference) / Setup (uv venv; `uv pip install -e ".[dev]"` recommended path + plain
+  requirements.txt alternative; OPENAI_API_KEY; optional DND_MODEL provider:model with
+  provider-package caveat; optional DND_DATA_DIR; chainlit create-secret) / Usage
+  (`chainlit run src/app.py` admin/admin; `.venv/bin/python src/demo.py`;
+  `.venv/bin/python -m pytest` no-key) / Customization: one subsection per data/*.json
+  with REAL shipped entries (avantor, flametongue_greatsword, fireball +
+  tensers_transformation, savage_attacks + great_weapon_master, kobold), slug-id + name
+  convention, dice regex, per-entry validation errors / Fuzzy matching (ids+names; 40
+  lookup / 70 live-combatant with goblin-vs-kobold_1 rationale; LLM 5e-knowledge fallback)
+  / Architecture (§3 tree, graph flow, DI factories + pydantic-in-state + fake-LLM tests).
+- Verification (orchestrator ran directly, 2026-07-19):
+  - Full suite AFTER deletions: **110 passed** (nothing imported the legacy files).
+  - `grep -rn "docs/character|from agent import|import agent\b|from tools import"
+    src/ tests/` → EMPTY; broader `grep -rn "docs/" src/ tests/ README.md chainlit.md` →
+    EMPTY. `ls src/agent.py src/tools.py docs/` → all "No such file or directory".
+  - README spot-checks against reality: install/run/test commands match the repo layout
+    verbatim; fireball + avantor JSON examples byte-faithful to shipped `data/` files;
+    kobold max_hp 5 matches; `data/` untouched by Phase F (git clean there).
+- Git state at Phase F end (uncommitted, for user review):
+  `M README.md, M chainlit.md, M src/app.py, M REFACTOR_PROGRESS.md,
+   D src/agent.py, D src/tools.py, D docs/{character,features,spells,weapons}.json`.
+- Resume notes: **core refactor COMPLETE (WP1–WP7).** Remaining before calling the project
+  fully verified: user's two live smokes — (1) `.venv/bin/python src/demo.py` (expect
+  Tenser's buff on avantor, goblin_1 dead after two greatsword hits, kobold_1..3 at 0/5 HP
+  dead after the 5th-level fireball, nonsense turn a no-op) and (2) the Chainlit checklist
+  in the WP6-app section. Optional next phase = **G (WP8 stretch)**: initiative/turn-order,
+  LLM-estimated HP for unknown monsters, death saves, `@pytest.mark.live` suite — each
+  behind its own tests; only on explicit user go-ahead.
 
 *(add a section per WP as work begins)*

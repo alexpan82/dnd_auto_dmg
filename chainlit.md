@@ -1,13 +1,14 @@
-# Making DnD combat easy with an Auto-Damage Calculator
+# Welcome to DnD-Auto-Damage (DaD) 👋
 
-Rolling for damage / effects in DnD combat is infamously complex and slows down the game. The using DnD Beyond / Roll20 still burdens the player with manual damage roll clicks and requires players to have perfect knowledge of character stats / feats. Additionally, these systems are not flexible to homebrew mechanics / items. They also take away from the player experience by unintentionally promoting online distractions which makes it difficult for players to be "present" during the session. 
+DaD is an LLM-driven combat tracker for your D&D table. Just narrate your turn like you would to a DM — DaD parses it, resolves it, and rolls the dice for real.
 
-We need an automated system that seamlessly integrates into the role-playing experience, does not allow for other distractions, and takes administrative burden away from DMs. Additionally, the system must be flexible to an ever-evolving campaign and generalizable to any (homebrew) campaign.
-
-We present DnD-Auto-Damage (DaD), an LLM-driven agentic workflow that addresses these limitations in managing combat logistics. Notable DaD features include
-- User can add any additional attributes / actions / items / spells to json files that allow for combat flexibility and specificity
-- Stateful matching of user prompts and user-added json entries
-- State persistence so that combat can pick-up where it left off
-- Tool usage so that players can feel assured that a real RNG is rolling hit die
+- Tracks a full roster of combatants — PCs, NPCs, and monsters — each with their own HP pool
+- Applies damage automatically and flags death/unconsciousness as HP hits zero
+- Tracks statuses and buffs with round-based durations (e.g. Tenser's Transformation)
+- Spins up ad-hoc enemies on the fly ("a group of 3 kobolds") — no pre-registration needed
+- Rolls real dice via tool calls, not vibes
+- Persists combat state between turns and sessions, and narrates what just happened
 
 ![Agent Graph](public/graph.png "Agent Graph")
+
+Just type your turn below to get started!

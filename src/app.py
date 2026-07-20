@@ -3,34 +3,49 @@ from langchain_core.runnables.config import RunnableConfig
 import chainlit as cl
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
-from agent import build_graph, _set_env
+from dnd_auto_dmg.graph import build_graph, RECURSION_LIMIT
+from dnd_auto_dmg.config import AppConfig
 import io
 from openai import AsyncOpenAI
 import wave
 import numpy as np
 import audioop
+import getpass
+import os
+
+
+def _set_env(var: str) -> None:
+    """Prompt for an env var if unset. Entry-point-level interactive
+    prompting is allowed here (Spec §7) - and ONLY here and demo.py."""
+    if not os.environ.get(var):
+        os.environ[var] = getpass.getpass(f"{var}: ")
+
 
 _set_env("CHAINLIT_AUTH_SECRET")
 _set_env("OPENAI_API_KEY")
 
 # Compile agent graph
-graph = build_graph()
+config = AppConfig()
+graph = build_graph(config=config)
 conn = sqlite3.connect(":memory:", check_same_thread=False)
 memory = SqliteSaver(conn)
 app = graph.compile(checkpointer=memory)
 
 
 async def update_state(state):
-    return {"langgraphState":{"character": state["character"],
-                 "metadata": state["metadata"]}
-                 }
+    state = state or {}
+    combatants = state.get("combatants") or {}
+    return {
+        "langgraphState": {
+            "combatants": {
+                cid: (c.model_dump() if hasattr(c, "model_dump") else c)
+                for cid, c in combatants.items()
+            },
+            "round": state.get("round_number", 1),
+            "log": (state.get("event_log") or [])[-10:],
+        }
+    }
 
-
-'''
-@cl.on_chat_start
-async def start():
-    ...
-'''
 
 @cl.password_auth_callback
 def auth_callback(username: str, password: str):
@@ -54,26 +69,29 @@ async def on_message(msg: cl.Message):
     # Loading dot is visible after the first streaming token is added into the message.
     await msg.stream_token(" ")
 
-    config = {"configurable": {"thread_id": cl.context.session.id}}
+    config_dict = {
+        "configurable": {"thread_id": cl.context.session.id},
+        "recursion_limit": RECURSION_LIMIT,
+    }
     cb = cl.LangchainCallbackHandler()
     final_answer = cl.Message(content="")
     current_state = None
 
-    for chunk in app.stream({"messages": [HumanMessage(content=msg.content)]}, 
-                                    stream_mode=["messages", "values"], 
-                                    config=RunnableConfig(callbacks=[cb], **config)):
+    for chunk in app.stream({"messages": [HumanMessage(content=msg.content)]},
+                                    stream_mode=["messages", "values"],
+                                    config=RunnableConfig(callbacks=[cb], **config_dict)):
         mode, data = chunk
 
-        # Only print AI messages from the "calculate_damage" node
+        # Only print AI messages from the streamed nodes (config.stream_nodes)
         if mode == 'messages':
             msg, metadata = data
             if (
                 msg.content
                 and not isinstance(msg, HumanMessage)
                 and not isinstance(msg, SystemMessage)
-                and metadata["langgraph_node"] == "calculate_damage"
+                and metadata.get("langgraph_node") in config.stream_nodes
             ):
-                
+
                 await final_answer.stream_token(msg.content)
 
         # Get most recent state
