@@ -4,9 +4,10 @@
 > how this file is maintained). Updated by the orchestrator after every subagent completes
 > and before every pause. A cold session resumes by reading the spec + this file only.
 
-**Current phase:** D (WP4a ∥ WP4b ∥ WP6-JSX) — awaiting user go-ahead
-**Base health:** WP1–WP3 done and green (69/69 tests); WP1 merged as PR #7, WP2 merged as
-  PR #8 (`bf12c3a`); old code intact; `docs/` untouched (removed in WP7)
+**Current phase:** E (WP5) — awaiting user go-ahead
+**Base health:** WP1–WP4a/4b/6-JSX done and green (107/107 tests); WP1–WP3 merged as
+  PRs #7/#8/#9 (`2e990b9`); Phase D work uncommitted in working tree; old code intact;
+  `docs/` untouched (removed in WP7)
 **Last updated:** 2026-07-19
 
 ## Phase / WP status
@@ -16,9 +17,9 @@
 | A | WP1 scaffolding/config/llm/tools | `done` | 23/23 tool tests pass; deps trimmed; lazy llm/config verified |
 | B | WP2 schemas/data/registry | `done` | 50/50 tests pass; registry validates real data; fireball resolves as spell |
 | C | WP3 state + serialization de-risk + conftest | `done` | 69/69 tests; serialization de-risk PASSED — pydantic kept in channels |
-| D | WP4a deterministic nodes | `pending` | — |
-| D | WP4b LLM nodes | `pending` | — |
-| D | WP6-JSX roster element | `pending` | — |
+| D | WP4a deterministic nodes | `done` | 26 tests; resolve/apply/begin_turn per §6; advance_round consumed in resolve |
+| D | WP4b LLM nodes | `done` | 12 tests; damage prompt renders real tools, no literal placeholders |
+| D | WP6-JSX roster element | `done` | rewritten against frozen §9 contract; code-reviewed (no JSX runner) |
 | E | WP5 graph/demo/integration | `pending` | — |
 | F | WP6-app Chainlit wiring | `pending` | — |
 | F | WP7 README + cleanup | `pending` | — |
@@ -70,6 +71,28 @@
   running on the resumed thread received a real `Combatant` and successfully
   `.model_copy(update=...)`-ed it (hp 62→52). JsonPlusSerializer handles pydantic v2 fine.
   **No dict fallback needed** — §5's "TypedDict state, pydantic values" design stands.
+- **WP4a / advance_round semantics (FINAL):** `advance_round` actions take effect ENTIRELY
+  inside `resolve_combatants` (round_number increment, per-combatant `duration_rounds`
+  decrement, expiry at <= 0 with event_log lines) and produce **NO ResolvedAction** — the
+  damage loop never sees them. Dropped (unresolvable-actor) actions also produce no
+  ResolvedAction. Downstream (route_actions in WP5) loops over `resolved_actions` only.
+- **WP4a / apply_damage message pruning:** walks `messages` backwards over the contiguous
+  trailing run of AIMessage/ToolMessage; emits `RemoveMessage` for every ToolMessage and
+  every AIMessage WITH tool_calls in that run; the final report AIMessage (no tool_calls)
+  is KEPT. Damage-then-healing order when a per-target entry carries both; healing clamps
+  at max_hp; hp clamps at 0 with `unconscious` (pc) / `dead` (npc/monster) + is_alive=False.
+  `damage_reports` has no reducer, so apply returns the FULL appended list.
+- **WP4b / calculate_damage factory shape:** `make_calculate_damage(llm_with_tools,
+  tools=None)` — `tools` (default `[roll_dice, add, subtract, multiply, divide]`) is used
+  ONLY to render tool names/descriptions into the prompt text; binding happened upstream in
+  `get_llm_with_tools`. Prompt built with f-strings/concat only (never `.format()`), so the
+  JSON example's braces are inert — old bug 1 (literal `{tools}`/`{roll_dice}`) is dead and
+  regression-tested (`tests/test_nodes_llm.py` asserts neither literal appears in the
+  rendered SystemMessage).
+- **Phase D / nodes/__init__.py ownership:** orchestrator pre-created the stub before
+  dispatch (eliminating the parallel-import race), WP4a filled in its three exports, and
+  the orchestrator reconciled WP4b's four exports post-merge. All 7 factories now export
+  from `dnd_auto_dmg.nodes`.
 - **WP2 / data content:** Avantor migrated with invented level-10 Bladesinger stats
   (max_hp 62, ac 15, all six abilities keeping source strength 18, proficiency_bonus 4);
   "Blade-signing" typo fixed to "Bladesinging"; Fireball moved weapons→spells;
@@ -168,5 +191,94 @@
   roster element (`public/elements/LanggraphStateDisplay.jsx` only, built against the
   frozen props contract in `state.py`). File ownership is disjoint — safe to parallelize.
   Await user go-ahead before starting.
+
+### WP4a — Deterministic nodes (Phase D, parallel)
+- Status: `done`
+- Files touched:
+  - `src/dnd_auto_dmg/nodes/__init__.py` (stub pre-created by orchestrator; WP4a added its
+    three exports; orchestrator later added WP4b's four — see decisions log)
+  - `src/dnd_auto_dmg/nodes/begin_turn.py` — `make_begin_turn()`: resets the five scratch
+    fields every invocation; initializes `combatants={}` + `round_number=1` only when
+    `"combatants" not in state`; returns no messages
+  - `src/dnd_auto_dmg/nodes/resolve.py` — `make_resolve_combatants(registry, config)`:
+    actor fuzzy vs live roster (threshold 70) then registry characters (instantiate on
+    first appearance); unknown actor → drop + event_log; targets: self/live-fuzzy/
+    monsters.json/adhoc(default_adhoc_hp) with count-N expansion reusing LIVING instances
+    first (dead ones skipped, fresh suffixes for the remainder); item fuzzy at lookup
+    threshold with `item_name_raw` fallback; statuses applied/removed on the actor BEFORE
+    damage (spell `applies_status` supplies name/duration); feature `.effect` texts
+    collected; advance_round handled wholly in-node (no ResolvedAction)
+  - `src/dnd_auto_dmg/nodes/apply.py` — `make_apply_damage(config)`: extract_json →
+    DamageReport with tolerant fallbacks (even split when per_target missing; zero-report
+    when no JSON); HP clamp 0/max_hp; death/unconscious statuses + is_alive; event_log
+    lines; cursor increment; RemoveMessages for current action's scaffolding only
+  - `tests/test_nodes_deterministic.py` — 26 tests covering all §10 resolve/apply/reset
+    behaviors (real registry data; no LLM)
+- Verification (orchestrator): 26/26 in isolation; full suite 107/107; spot-read of
+  begin_turn/resolve/apply confirms §6 contracts.
+- Deviation note: two spec EXAMPLE strings ("Sacred Flame of Zeus", "weird beast")
+  empirically score ABOVE the fuzzy thresholds against real data, so tests use verified
+  true-miss strings ("quantum blaster", "qzxjkvw482") instead; behavior under test
+  unchanged. This also foreshadows §12 risk 5 (threshold tuning in WP5).
+
+### WP4b — LLM nodes (Phase D, parallel)
+- Status: `done`
+- Files touched:
+  - `src/dnd_auto_dmg/nodes/relevance.py` — `make_check_relevance(llm)`: plain llm (no
+    tools bound — fixes old pointless binding), ephemeral SystemMessage, case-insensitive
+    "yes" parse, returns exactly `{"relevant_query": bool}` (no messages)
+  - `src/dnd_auto_dmg/nodes/parse.py` — `make_parse_actions(llm)`:
+    `with_structured_output(ParsedTurn)` primary, extract_json+model_validate fallback,
+    `ParsedTurn(actions=[])` on any failure; prompt covers multi-action, target counts,
+    pronoun resolution, upcast level, statuses, advance_round; returns only parsed_actions
+  - `src/dnd_auto_dmg/nodes/damage.py` — `make_calculate_damage(llm_with_tools, tools=None)`
+    (+ `DEFAULT_TOOLS`): real-template system prompt (see decisions log), full context
+    block (actor sheet/statuses/feature texts/item-or-raw/crit/spell level/target
+    id-name-ac-hp), returns only `{"messages": [response]}`
+  - `src/dnd_auto_dmg/nodes/narrate.py` — `make_narrate(llm)`: 2–3 vivid sentences from the
+    last 20 event_log lines; returns only `[response]` (enable_narration gate is WP5 graph
+    wiring)
+  - `tests/test_nodes_llm.py` — 12 tests, all on conftest's ScriptedChatModel: relevance
+    bool + no-messages; parse single/multi/fallback/garbage; damage exact-update +
+    prompt-content assertions (real `roll_dice` description present, NO literal
+    `{tools}`/`{roll_dice}`, actual target id, DamageReport shape, crit + feature text);
+    narrate update shape + event_log in prompt
+- Verification (orchestrator): 12/12 in isolation; full suite 107/107; grep confirms the
+  no-literal-placeholder assertions (test lines 253–254); read of damage.py confirms
+  f-string-only prompt construction.
+
+### WP6-JSX — Combatant roster element (Phase D, parallel)
+- Status: `done` (code-review acceptance — no JSX test runner in repo)
+- Files touched: `public/elements/LanggraphStateDisplay.jsx` (rewritten in place)
+- Reviewed against the frozen §9 contract (orchestrator):
+  - Reads EXACTLY `props.langgraphState.{combatants,round,log}` behind the
+    `typeof props !== 'undefined'` Chainlit guard; consumes only Combatant.model_dump
+    fields (`id,name,kind,max_hp,hp,ac,statuses[].name/duration_rounds,origin,is_alive`);
+    invents no fields.
+  - Per-combatant card: name, kind badge (PC/NPC/Monster color-coded), "ad-hoc" marker,
+    AC + shield icon when non-null, HP bar (`clamp(hp/max_hp,0,100)`, `max_hp==0` guarded;
+    >50% green / 20–50% amber / <20% red / dead grey + `Skull` icon + "(down)"), status
+    badges prettified with `(duration_rounds)` when present, dead/unconscious styled red.
+  - Header: `Swords` icon + "Combat Tracker" + "Round N" badge; empty roster placeholder;
+    collapsible event log (useState toggle, chevrons, count, empty message); pcs → npcs →
+    monsters sort, alphabetical within kind.
+  - Imports limited to react / @/components/ui/{card,badge,separator} / lucide-react.
+  - Dropped the old useEffect/state-mirror + refresh button in favor of pure
+    derive-from-props (simpler, no stale-state); old `character`/`metadata` props are gone
+    per the new contract.
+- Verification: careful structural read (tags balanced, keys on maps, conditionals
+  parenthesized); real render smoke happens at WP6-app (Phase F) per plan §10.
+
+- Phase D resume notes: `nodes/__init__.py` reconciled with all 7 factory exports; full
+  suite 107/107 (`.venv/bin/python -m pytest tests/ -q`). Next phase = **E (WP5)**: graph
+  wiring + demo + integration (see §6 wiring diagram, §10 integration scenario, §11 WP5
+  row, §12 risks 3/5/6). WP5 owns `src/dnd_auto_dmg/graph.py`, `src/demo.py` (rewrite of
+  the legacy thin CLI), `tests/test_graph_integration.py`. Must include: `build_graph(llm=
+  None, registry=None, config=None)` factory wiring §6's diagram (tools_condition loop,
+  action-cursor loop with recursion_limit guard, enable_narration gate, no-valid-actions
+  END route), the §10 integration scenario on ScriptedChatModel (Tenser's lands on
+  Avantor; goblin HP drops; "They do it again" reuse; 5th-level fireball kills 3 kobolds;
+  nonsense → END unchanged; explicit `current_action_index == len(resolved_actions)`
+  termination assertion), and demo.py printing roster HP per turn. Await user go-ahead.
 
 *(add a section per WP as work begins)*
