@@ -17,6 +17,7 @@ dependencies = [
     "langchain-core",
     "langchain==0.3.27",
     "langchain-openai",
+    "langchain-ollama",
     "langgraph-cli[inmem]",
     "pyaudio",
     "numpy",

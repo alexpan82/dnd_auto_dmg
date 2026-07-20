@@ -25,7 +25,7 @@ def _default_data_dir() -> Path:
 
 
 def _model_default() -> str:
-    return os.environ.get("DND_MODEL", "openai:gpt-4o")
+    return os.environ.get("DND_MODEL", "ollama:minimax-m3:cloud")
 
 
 def _data_dir_default() -> Path:

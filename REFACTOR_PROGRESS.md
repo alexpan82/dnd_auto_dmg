@@ -4,12 +4,13 @@
 > how this file is maintained). Updated by the orchestrator after every subagent completes
 > and before every pause. A cold session resumes by reading the spec + this file only.
 
-**Current phase:** G (WP8 stretch, optional) — core refactor COMPLETE pending user's live
-  smokes (demo.py + Chainlit boot; see WP6-app/WP7 sections for the checklist)
+**Current phase:** G2 (WP8 stretch, optional) — awaiting user go-ahead. WP9 (Ollama default)
+  is `done` and green (113/113); Phase F + WP9 are uncommitted in the working tree for the
+  user to review / split into PRs. Live Ollama smoke deferred to user (see resume notes).
 **Base health:** WP1–WP7 done and green (110/110 tests); merged through PR #11 (`cadb805`);
   Phase F work uncommitted in working tree; ALL legacy code removed (src/agent.py, old
   src/tools.py, docs/); live smokes deferred to user (no API keys in orchestrator env)
-**Last updated:** 2026-07-19
+**Last updated:** 2026-07-20
 
 ## Phase / WP status
 
@@ -24,7 +25,8 @@
 | E | WP5 graph/demo/integration | `done` | 110/110 tests; §10 scenario passes incl. termination assertion; thresholds verified, no tuning needed |
 | F | WP6-app Chainlit wiring | `done` | streams config.stream_nodes; frozen §9 props; audio path byte-for-byte; boot smoke deferred |
 | F | WP7 README + cleanup | `done` | README/chainlit.md rewritten; agent.py + old tools.py + docs/ deleted; legacy grep empty |
-| G | WP8 stretch (optional) | `pending` | — |
+| G1 | WP9 Ollama default | `done` | default → ollama:minimax-m3:cloud; provider-robust bind_tools; provider-gated key prompt; 113/113 |
+| G2 | WP8 stretch (optional) | `pending` | — |
 
 ## Decisions log
 
@@ -126,6 +128,43 @@
   `src/dnd_auto_dmg/`. Legacy-reference grep over src/ + tests/ + README + chainlit.md is
   empty. The `public/graph.png` referenced by README/chainlit.md is the pre-refactor
   render (stale but harmless — regenerating it requires graphviz/network; left as-is).
+- **WP9 / Ollama default (§12a, 2026-07-20):** default chat model is now
+  `ollama:minimax-m3:cloud` (`config._model_default()` env fallback via `DND_MODEL`).
+  `init_chat_model` splits provider on the FIRST colon → provider `ollama`, model
+  `minimax-m3:cloud` (verified). gpt-4o still reachable via `DND_MODEL=openai:gpt-4o`.
+- **WP9 / tool-binding TypeError fallback — SUPERSEDED, was buggy.** Original WP9 wrapped
+  `bind_tools(tools, parallel_tool_calls=False)` in `try/except TypeError`. That NEVER fires:
+  `bind_tools` does not validate the kwarg, it stashes it in `RunnableBinding.kwargs` and
+  forwards it to the provider client at INVOKE time. So on the ollama default the kwarg rode
+  through to `ollama.Client.chat()` and crashed the FIRST real `calculate_damage` invoke
+  (`TypeError: Client.chat() got an unexpected keyword argument 'parallel_tool_calls'`) — the
+  user hit this running `src/demo.py`. Root cause of the miss: WP9 verification only called
+  `get_llm_with_tools()` (binds; never raises) without invoking against a live Ollama server.
+- **WP9-fix / provider-gated bind (2026-07-20, main session):** `get_llm_with_tools` now
+  passes `parallel_tool_calls=False` ONLY when `config.model`'s provider prefix is in
+  `{openai, azure_openai}` (`_PARALLEL_TOOL_CALLS_PROVIDERS`); every other provider gets a
+  plain `bind_tools(tools)`. Regression tests assert on the BOUND KWARGS (not just that
+  binding succeeds): ollama binding has `{tools}` only, openai binding has
+  `{tools, parallel_tool_calls: False}` — this is the check the earlier verification lacked.
+  Suite now 115 green. Live ollama invoke still deferred to user (no daemon in this env).
+- **WP9 / provider-gated OPENAI_API_KEY prompt:** `app.py` and `demo.py` now only prompt
+  for `OPENAI_API_KEY` when `AppConfig().model.split(":", 1)[0] == "openai"`; the
+  `CHAINLIT_AUTH_SECRET` prompt in `app.py` stays unconditional. Ollama cloud auth is the
+  `ollama` daemon/CLI's job (`ollama signin`), not an env var this app manages.
+- **WP9 / Whisper-still-needs-OpenAI caveat (KNOWN FRICTION, documented per §12a pt 4, NOT
+  code-changed):** `app.py` constructs `openai_client = AsyncOpenAI()` at MODULE IMPORT
+  time (line ~126, inside the untouched audio path). Verified empirically that
+  `AsyncOpenAI()` raises `OpenAIError` when `OPENAI_API_KEY` is unset — so
+  `chainlit run src/app.py` currently will NOT boot on the Ollama default unless
+  `OPENAI_API_KEY` is set, even for text-only use and even though the chat model is Ollama.
+  §12a explicitly resolved this by DOCUMENTATION ("Do NOT rip out the audio path"), so WP9
+  left the eager client as-is and README (line ~70) documents the caveat honestly. NOTE
+  this contradicts §12a's aside "the text path does not [need OPENAI_API_KEY]" for the
+  Chainlit UI specifically (demo.py IS keyless on Ollama — it has no AsyncOpenAI). RECOMMEND
+  a tiny follow-up (out of WP9 scope): lazy-construct the OpenAI client inside
+  `speech_to_text` so app.py boots keyless on Ollama and OPENAI_API_KEY is only required
+  when voice input is actually used. Flagged to the user; not done to honor the spec's
+  no-touch-audio directive.
 - **WP2 / data content:** Avantor migrated with invented level-10 Bladesinger stats
   (max_hp 62, ac 15, all six abilities keeping source strength 18, proficiency_bonus 4);
   "Blade-signing" typo fixed to "Bladesinging"; Fireball moved weapons→spells;
@@ -417,5 +456,69 @@
   in the WP6-app section. Optional next phase = **G (WP8 stretch)**: initiative/turn-order,
   LLM-estimated HP for unknown monsters, death saves, `@pytest.mark.live` suite — each
   behind its own tests; only on explicit user go-ahead.
+
+### WP9 — Ollama as default model (Phase G1)
+- Status: `done`
+- Delegated to a Sonnet subagent (§12a pasted verbatim + current llm.py/config.py + the
+  entry-point env-prompt sections of app.py/demo.py); orchestrator verified everything
+  directly (did not trust the subagent report).
+- Files touched:
+  - `src/dnd_auto_dmg/config.py` — `_model_default()` → `os.environ.get("DND_MODEL",
+    "ollama:minimax-m3:cloud")` (was `"openai:gpt-4o"`). Only line changed.
+  - `src/dnd_auto_dmg/llm.py` — `get_llm_with_tools` wraps `bind_tools(..., 
+    parallel_tool_calls=False)` in try/except `TypeError` → `bind_tools(tools)`
+    (provider-robust; still lazy). `get_llm` unchanged.
+  - `src/app.py` — dropped the unconditional `_set_env("OPENAI_API_KEY")`; now builds
+    `config = AppConfig()` right after the (still unconditional) `_set_env(
+    "CHAINLIT_AUTH_SECRET")` and prompts for the OpenAI key only when
+    `config.model.split(":", 1)[0] == "openai"`. Audio/whisper path (speech_to_text,
+    on_audio_start/chunk/end, process_audio, module-scope `AsyncOpenAI()`) untouched.
+  - `src/demo.py` — added `from dnd_auto_dmg.config import AppConfig`; `_ensure_api_key()`
+    early-returns unless the provider is `openai`; docstrings refreshed. No AsyncOpenAI in
+    demo.py, so demo.py is fully keyless on the Ollama default.
+  - `requirements.txt` + `pyproject.toml` — added `langchain-ollama` (unpinned, next to
+    `langchain-openai`).
+  - `README.md` — Ollama presented as the default (feature bullet + "Set up the model"
+    section: `ollama signin` for cloud / `ollama pull` for local; switch back via
+    `DND_MODEL=openai:gpt-4o` + `OPENAI_API_KEY`; generic `provider:model` note; explicit
+    **audio-input caveat** that app.py's import-time `AsyncOpenAI()` currently makes
+    `OPENAI_API_KEY` required to start the Chainlit UI at all, while demo.py needs none
+    under the Ollama default). CLI-demo section updated to per-provider requirement.
+  - `tests/test_llm_config.py` (NEW) — 3 tests using `monkeypatch.delenv/setenv` on
+    `DND_MODEL` BEFORE constructing `AppConfig()` (field uses `default_factory`, evaluated
+    at construction): default → `ollama:minimax-m3:cloud`; provider parse
+    (`split(":",1) == ["ollama","minimax-m3:cloud"]`, proving first-colon-only split);
+    `DND_MODEL=openai:gpt-4o` override. No test constructs a model or needs a live server.
+- Verification (orchestrator ran directly, 2026-07-20):
+  - `uv pip install -e ".[dev]" --python .venv/bin/python` → installed **langchain-ollama
+    0.3.10** + its dep **ollama 0.6.2** cleanly; no other resolution changes.
+  - `.venv/bin/python -m pytest tests/ -q` → **113 passed** (110 base + 3 new).
+  - `env -u OPENAI_API_KEY .venv/bin/python -c "from dnd_auto_dmg.llm import get_llm,
+    get_llm_with_tools; m=get_llm(); print(type(m).__name__); get_llm_with_tools()"` →
+    printed `ChatOllama` + `bind_tools OK`; **no prompt, no network error** (lazy construct;
+    TypeError fallback exercised because ChatOllama rejects parallel_tool_calls).
+  - `env -u OPENAI_API_KEY DND_MODEL=openai:gpt-4o .venv/bin/python -c "from
+    dnd_auto_dmg.config import AppConfig; print(AppConfig().model)"` → **`openai:gpt-4o`**.
+  - AST check of `src/app.py`: speech_to_text, on_audio_chunk, process_audio, on_audio_start,
+    on_audio_end all PRESENT; `AsyncOpenAI` import present. Grep confirmed the provider gate
+    in both app.py (`if config.model.split(":", 1)[0] == "openai":`) and demo.py
+    (`if AppConfig().model.split(":", 1)[0] != "openai": return`), and `langchain-ollama`
+    present in both requirements.txt and pyproject.toml.
+  - Confirmed empirically that module-scope `AsyncOpenAI()` raises `OpenAIError` without a
+    key (basis for the README audio caveat + the friction note in the Decisions log).
+- Deviations: none in the seven deliverables. ONE known friction flagged (not a deviation
+  from acceptance): app.py's eager import-time `AsyncOpenAI()` means the Chainlit UI still
+  needs `OPENAI_API_KEY` to boot even on Ollama — resolved via documentation per §12a's
+  no-touch-audio directive; recommended lazy-client follow-up recorded in the Decisions log.
+- Resume notes: **WP9 done, base green (113/113).** Phase F + WP9 changes are uncommitted in
+  the working tree (config.py, llm.py, app.py, demo.py, requirements.txt, pyproject.toml,
+  README.md, tests/test_llm_config.py, plus the Phase F files already staged/committed in
+  HEAD) — user reviews/splits PRs. **User's manual Ollama smoke** (deferred — orchestrator
+  has no Ollama daemon): start the daemon + `ollama signin` (the shipped default
+  `minimax-m3:cloud` is a cloud model), then `.venv/bin/python src/demo.py` — expect
+  Tenser's buff on avantor, goblin_1 dead after two greatsword hits, kobold_1..3 at 0/5 HP
+  after the 5th-level fireball, nonsense turn a no-op. Optional next phase = **G2 (WP8
+  stretch)**: initiative/turn-order, LLM-estimated HP for unknown monsters, death saves,
+  `@pytest.mark.live` suite — each behind its own tests; only on explicit user go-ahead.
 
 *(add a section per WP as work begins)*

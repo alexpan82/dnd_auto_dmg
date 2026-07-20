@@ -22,10 +22,11 @@ def _set_env(var: str) -> None:
 
 
 _set_env("CHAINLIT_AUTH_SECRET")
-_set_env("OPENAI_API_KEY")
 
 # Compile agent graph
 config = AppConfig()
+if config.model.split(":", 1)[0] == "openai":
+    _set_env("OPENAI_API_KEY")
 graph = build_graph(config=config)
 conn = sqlite3.connect(":memory:", check_same_thread=False)
 memory = SqliteSaver(conn)
