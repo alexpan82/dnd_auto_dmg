@@ -30,8 +30,9 @@ last touched it.
 Per-turn scratch fields and checkpointing
 ------------------------------------------
 ``relevant_query``, ``parsed_actions``, ``resolved_actions``,
-``current_action_index``, and ``damage_reports`` are scratch space for a
-single turn's processing pipeline. Because the graph runs under a
+``current_action_index``, ``damage_reports``, ``turn_status``,
+``turn_event_start``, ``pending_report``, and ``damage_messages`` are scratch
+space for a single turn's processing pipeline. Because the graph runs under a
 checkpointer, LangGraph persists EVERY channel's value at each step and
 restores it on the next ``invoke`` against the same ``thread_id`` -- these
 scratch fields are NOT automatically cleared between turns just because a
@@ -39,6 +40,24 @@ new user message comes in. A WP4a node named ``begin_turn`` is responsible
 for explicitly resetting all of these fields at the START of every
 invocation (see ``tests/test_state.py`` for a demonstration that, absent
 such a reset, a scratch field set on turn N is still visible on turn N+1).
+
+Reset semantics for the newer scratch fields (``begin_turn``, per turn):
+
+* ``turn_status`` -- reset to ``"parse_failed"``, the safe default: if the
+  turn's pipeline errors out before any node explicitly sets a more specific
+  status (``"combat"`` or ``"irrelevant"``), the turn is treated as having
+  failed to parse rather than silently succeeding.
+* ``turn_event_start`` -- reset to ``len(state.get("event_log") or [])``,
+  i.e. the length of the event log BEFORE this turn's nodes append anything.
+  ``respond`` later slices ``event_log[turn_event_start:]`` to narrate only
+  the lines this turn produced.
+* ``pending_report`` -- reset to ``None``. Written by ``damage_det`` (one
+  ``DamageReport`` at a time) and consumed + cleared by ``apply_damage``.
+* ``damage_messages`` -- an isolated tool-loop message channel (its own
+  ``add_messages`` reducer, separate from ``messages``). Cleared with
+  ``RemoveMessage(id=REMOVE_ALL_MESSAGES)`` both by ``apply_damage`` (after
+  each resolved action's tool loop) and by ``begin_turn`` (once per turn),
+  so one action's tool-calling scratch never leaks into the next.
 
 Frozen UI props contract (Spec §9)
 -----------------------------------
@@ -68,7 +87,7 @@ Field notes:
 """
 
 import operator
-from typing import Annotated, Dict, List, Optional, TypedDict
+from typing import Annotated, Dict, List, Literal, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -155,3 +174,29 @@ class CombatState(TypedDict, total=False):
 
     #: Computed damage/healing results, one per resolved action.
     damage_reports: list[DamageReport]
+
+    #: Outcome classification for the CURRENT turn's pipeline. Set by the
+    #: routing/parsing nodes as the turn progresses; begin_turn resets it to
+    #: ``"parse_failed"`` (the safe default) at the start of every invoke so
+    #: an unhandled error mid-pipeline reads as a failed parse rather than a
+    #: stale "combat" from a previous turn.
+    turn_status: Literal["combat", "irrelevant", "parse_failed"]
+
+    #: ``len(event_log)`` as of the START of the current turn (set by
+    #: begin_turn). ``respond`` uses this to slice ``event_log[turn_event_start:]``
+    #: -- i.e. only the lines THIS turn appended -- rather than narrating the
+    #: whole accumulated log.
+    turn_event_start: int
+
+    #: The most recently computed ``DamageReport`` awaiting application to
+    #: combatant state. Written by ``damage_det``, read and cleared (reset to
+    #: ``None``) by ``apply_damage`` once it has applied that report.
+    pending_report: Optional[DamageReport]
+
+    #: Isolated message channel for the per-action damage tool-loop (kept
+    #: separate from ``messages`` so tool-calling scratch for one action
+    #: never bleeds into the main chat history or into the next action).
+    #: Cleared with ``RemoveMessage(id=REMOVE_ALL_MESSAGES)`` by
+    #: ``apply_damage`` after each action and by ``begin_turn`` at the start
+    #: of every turn.
+    damage_messages: Annotated[list[BaseMessage], add_messages]

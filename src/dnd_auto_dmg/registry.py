@@ -181,6 +181,8 @@ class DataRegistry:
             features=list(sheet.features),
             inventory=list(sheet.inventory),
             origin="roster",
+            level=sheet.level,
+            proficiency_bonus=sheet.proficiency_bonus,
         )
 
     def combatant_from_monster(self, monster_id: str, suffix: Union[int, str]) -> Combatant:

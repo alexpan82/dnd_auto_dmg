@@ -23,7 +23,9 @@
         "applies_status": {
             "name": "tensers_transformation",
             "duration_rounds": 10,
-            "effect": "Your weapon attacks deal an extra 2d12 force damage on a hit."
+            "effect": "Your weapon attacks deal an extra 2d12 force damage on a hit.",
+            "damage_rider": {"force": "2d12"},
+            "grants_temp_hp": 50
         },
         "description": "You endow yourself with endurance and martial prowess fueled by magic."
     }

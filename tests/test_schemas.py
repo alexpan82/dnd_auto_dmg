@@ -11,6 +11,7 @@ from dnd_auto_dmg.schemas import (
     ParsedAction,
     ParsedTurn,
     PerTargetDamage,
+    ResolvedAction,
     SpellDef,
     SpellSave,
     StatusEffect,
@@ -111,6 +112,128 @@ def test_combatant_defaults():
     assert combatant.features == []
     assert combatant.statuses == []
     assert combatant.inventory == []
+    # WP10 additive fields -- must default cleanly for every existing caller
+    # that never sets them.
+    assert combatant.temp_hp == 0
+    assert combatant.level is None
+    assert combatant.proficiency_bonus is None
+
+
+def test_combatant_temp_hp_level_pb_settable():
+    combatant = Combatant(
+        id="avantor",
+        name="Avantor",
+        kind="pc",
+        max_hp=62,
+        hp=62,
+        temp_hp=50,
+        level=10,
+        proficiency_bonus=4,
+    )
+    assert combatant.temp_hp == 50
+    assert combatant.level == 10
+    assert combatant.proficiency_bonus == 4
+
+
+# --------- StatusEffect.damage_rider --------- #
+def test_status_effect_damage_rider_defaults_to_none_and_is_settable():
+    status = StatusEffect(name="tensers_transformation")
+    assert status.damage_rider is None
+
+    status_with_rider = StatusEffect(
+        name="tensers_transformation", damage_rider={"force": "2d12"}
+    )
+    assert status_with_rider.damage_rider == {"force": "2d12"}
+
+
+# --------- AppliedStatus.damage_rider / grants_temp_hp --------- #
+def test_applied_status_defaults_cleanly():
+    status = AppliedStatus(name="blessed", effect="+1d4 to attacks and saves.")
+    assert status.damage_rider is None
+    assert status.grants_temp_hp is None
+
+
+def test_applied_status_accepts_valid_damage_rider():
+    status = AppliedStatus(
+        name="tensers_transformation",
+        effect="Your weapon attacks deal an extra 2d12 force damage on a hit.",
+        damage_rider={"force": "2d12"},
+        grants_temp_hp=50,
+    )
+    assert status.damage_rider == {"force": "2d12"}
+    assert status.grants_temp_hp == 50
+
+
+@pytest.mark.parametrize("bad_dice", ["2x6", "d6", "2d6+", "abc"])
+def test_applied_status_rejects_invalid_damage_rider_dice(bad_dice):
+    with pytest.raises(ValidationError):
+        AppliedStatus(
+            name="tensers_transformation",
+            effect="Extra damage on a hit.",
+            damage_rider={"force": bad_dice},
+        )
+
+
+# --------- FeatureDef additive fields --------- #
+def test_feature_def_new_fields_default_cleanly():
+    feature = FeatureDef(name="Some Feature")
+    assert feature.crit_extra_die is False
+    assert feature.flat_damage_bonus == 0
+    assert feature.opt_in is False
+
+
+def test_feature_def_new_fields_settable():
+    savage = FeatureDef(name="Savage Attacks", crit_extra_die=True)
+    assert savage.crit_extra_die is True
+
+    gwm = FeatureDef(
+        name="Great Weapon Master", flat_damage_bonus=10, opt_in=True
+    )
+    assert gwm.flat_damage_bonus == 10
+    assert gwm.opt_in is True
+
+
+# --------- ParsedAction.actor default / ParsedTurn.relevant default --------- #
+def test_parsed_action_actor_defaults_to_empty_string():
+    # actorless advance_round action -- actor is no longer required.
+    action = ParsedAction(action_type="advance_round")
+    assert action.actor == ""
+
+
+def test_parsed_turn_relevant_defaults_to_true():
+    turn = ParsedTurn(actions=[])
+    assert turn.relevant is True
+
+    irrelevant_turn = ParsedTurn(actions=[], relevant=False)
+    assert irrelevant_turn.relevant is False
+
+
+# --------- ResolvedAction additive fields --------- #
+def test_resolved_action_new_fields_default_cleanly():
+    resolved = ResolvedAction(
+        action=ParsedAction(actor="Avantor", action_type="attack"),
+        actor_id="avantor",
+    )
+    assert resolved.item_id is None
+    assert resolved.item_kind is None
+    assert resolved.feature_defs == {}
+    assert resolved.features_invoked == []
+    assert resolved.feature_texts == {}  # still present, untouched by the new fields
+
+
+def test_resolved_action_new_fields_settable():
+    resolved = ResolvedAction(
+        action=ParsedAction(actor="Avantor", action_type="attack"),
+        actor_id="avantor",
+        item_id="flametongue_greatsword",
+        item_kind="weapon",
+        feature_defs={"savage_attacks": {"name": "Savage Attacks", "crit_extra_die": True}},
+        features_invoked=["savage_attacks"],
+    )
+    assert resolved.item_id == "flametongue_greatsword"
+    assert resolved.item_kind == "weapon"
+    assert resolved.feature_defs["savage_attacks"]["crit_extra_die"] is True
+    assert resolved.features_invoked == ["savage_attacks"]
 
 
 # --------- CharacterSheet "class" alias --------- #

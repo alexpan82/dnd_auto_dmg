@@ -452,3 +452,311 @@ in) is deferred to the user.
 - **Do not commit or push** — the user handles git at the pause gates.
 - **Escalate, don't improvise**: if a design decision in this spec proves unworkable,
   record the problem + recommendation in the ledger under `blocked` and stop the phase.
+
+---
+
+# PART 2 — Combat Overhaul (WP10–WP16, Phases H1–H5; added 2026-07-26)
+
+> Orchestrated by Opus 5 with Sonnet 5 subagents. Same protocol as Part 1 (§13): one phase
+> per run, verify acceptance yourself, update `REFACTOR_PROGRESS.md` after every subagent
+> and before every pause, never commit, escalate blockers to the ledger.
+
+## §14. Why (live-run failures, all root-caused with file:line evidence)
+
+First real Chainlit run on `ollama:minimax-m3:cloud` exposed:
+
+1. **Statuses never land** — `resolve.py:204-217` applies only statuses the parse LLM lists
+   in `statuses_applied`; real LLMs list none for a named spell, and the matched
+   `SpellDef.applies_status` is never auto-applied (tests masked this by scripting the
+   field). Status application also writes NO event_log line even when it works, and
+   statuses always land on the ACTOR regardless of `SpellDef.targeting`.
+2. **Silent turns** — `relevance.py:39` `startswith("yes")` breaks on `<think>` blocks
+   (ChatOllama `reasoning` never set → think text lands in content), markdown (`**Yes**`),
+   or prose imitation once AI narration accumulates; turn routes to END; `app.py` sends an
+   EMPTY bubble (no fallback text path exists).
+3. **Duplicated output** — both `calculate_damage` (raw ```json + prose + tool-call
+   scratch) and `narrate` stream into ONE Chainlit message; narrate paraphrases the report
+   AIMessage kept directly above it in history.
+4. **Slow turns** — 5–7+ LLM calls/turn (relevance + parse + k×damage-tool-loop + narrate);
+   every call carries FULL history that grows with kept report JSON; `llm.py:23` passes
+   ZERO kwargs → server-default num_ctx (2048: silent truncation by ~turn 3),
+   temperature 0.8, thinking enabled.
+5. **B-list** (30 verified bugs, see ledger discussion). Fixed in this part: B1 (module-level
+   `AsyncOpenAI()` blocks keyless ollama boot), B2 (dead combatants valid targets), B3
+   (healing never revives), B4 (`extract_json` gives up on first brace candidate), B5
+   (narrate reads stale cross-turn event lines), B6 (AoE divided across targets instead of
+   full to each), B7 (`advance_round` needs an actor → rounds/durations never tick), B8
+   (empty bubble), B9 (`divide()` returns 1 for ≤0), B10 (`subtract` docstring says
+   "Adds"), B11 (repeat adhoc multi-target attacks reset HP), B12 (status ignores
+   targeting), B13 (graph.py dead try/except bind), B14 (prior action's report in next
+   prompt), B15/B16 (tool-scaffolding message pollution/orphans), B17 (case-sensitive
+   fuzzy), B18 (threshold 40 matches "longsword"→flametongue, "bob"→kobold), B20 (registry
+   drops proficiency/level), B21 (all features presented as in-play), B22/B23 (app.py
+   shadowing / audio NameError), B27 (demo/app divergence), B29 (flametongue double-counts
+   fire; weapons.json too sparse). Deferred: B19 (real persistence — README wording fixed
+   only), B24 (auth), B26 (minor config knobs), B28 cosmetics, B30.
+
+User-confirmed scope: player-turn bugs only (NO monster-AI turns); approved speed levers =
+merge relevance into parse, deterministic Python dice for matched items, single combined
+output call; add temp_hp.
+
+## §15. Target graph topology
+
+```
+START → begin_turn → parse_turn
+parse_turn  --route_parse-->  resolve_combatants   if turn_status == "combat"
+                              respond              otherwise ("irrelevant" | "parse_failed")
+resolve_combatants --route_action--> damage_det | calculate_damage | respond
+damage_det → apply_damage
+calculate_damage --tools_condition(damage_messages)--> roll_dice → calculate_damage
+calculate_damage --(no tool calls)--> apply_damage
+apply_damage --route_action--> damage_det | calculate_damage | respond
+respond → END
+```
+
+- `route_action(state)` (ONE shared function in graph.py): `idx = current_action_index`;
+  `idx >= len(resolved_actions)` → `"respond"`; elif `resolved_actions[idx].item is not
+  None` → `"damage_det"`; else → `"calculate_damage"` (item_name_raw / homebrew only).
+- `respond` is UNCONDITIONAL — every turn ends with exactly one streamed AIMessage.
+- DELETED: `nodes/relevance.py`, `nodes/narrate.py`, inline `no_actions` node,
+  `state.relevant_query`, `config.enable_narration` (WP15 holds sole deletion rights;
+  earlier WPs keep them so the suite stays green at every gate).
+- `roll_dice` node = `ToolNode(_TOOLS, messages_key="damage_messages")`; routing via
+  `lambda s: tools_condition(s, messages_key="damage_messages")` (langgraph 1.0.1 supports
+  both — verified).
+- Common matched-item turn = exactly 2 LLM calls (parse_turn + respond), zero tool loops.
+
+## §16. Schema / state / config changes (ALL additive until WP15)
+
+Runtime models (`schemas.py`):
+- `Combatant`: `temp_hp: int = 0`, `level: Optional[int] = None`,
+  `proficiency_bonus: Optional[int] = None`.
+- `StatusEffect`: `damage_rider: Optional[Dict[str, str]] = None` (dmg_type → dice; copied
+  from AppliedStatus at cast time so the engine never needs a registry lookup).
+- `ParsedAction.actor: str = ""` (actorless advance_round).
+- `ParsedTurn`: `relevant: bool = True`.
+- `ResolvedAction`: `item_id: Optional[str] = None`,
+  `item_kind: Optional[Literal["weapon","spell"]] = None`,
+  `feature_defs: Dict[str, dict] = {}` (id → FeatureDef.model_dump()),
+  `features_invoked: List[str] = []` (canonical ids resolve matched from
+  action.features_used). `feature_texts` kept for the LLM fallback prompt.
+
+Data-file models (`schemas.py`):
+- `AppliedStatus`: `damage_rider: Optional[Dict[str, str]] = None` (dice-string validated),
+  `grants_temp_hp: Optional[int] = None`.
+- `FeatureDef`: `crit_extra_die: bool = False`, `flat_damage_bonus: int = 0`,
+  `opt_in: bool = False`.
+
+Data edits (`data/`):
+- `spells.json` tensers_transformation.applies_status gains
+  `"damage_rider": {"force": "2d12"}, "grants_temp_hp": 50` (keep free-text `effect`).
+- `features.json`: savage_attacks + `"crit_extra_die": true`; great_weapon_master +
+  `"flat_damage_bonus": 10, "opt_in": true`.
+- `weapons.json`: flametongue `special_effects` rewritten so it no longer restates the 2d6
+  fire already in `damage` (e.g. "The blade is wreathed in flame."). ADD generic weapons:
+  longsword 1d8 slashing (versatile), greatsword 2d6 slashing, dagger 1d4 piercing
+  (finesse), shortbow 1d6 piercing (dexterity), mace 1d6 bludgeoning, handaxe 1d6 slashing.
+- `registry.combatant_from_character` must populate `level` and `proficiency_bonus`
+  (currently dropped, registry.py:173-184).
+
+`CombatState` (`state.py`) — new scratch (reset by begin_turn each invoke):
+- `turn_status: Literal["combat","irrelevant","parse_failed"]` (begin_turn default:
+  `"parse_failed"` as safe value).
+- `turn_event_start: int` — begin_turn sets `len(state.get("event_log") or [])`; respond
+  uses `event_log[turn_event_start:]`.
+- `pending_report: Optional[DamageReport]` — written by damage_det, consumed+cleared by
+  apply_damage.
+- `damage_messages: Annotated[list[BaseMessage], add_messages]` — isolated tool-loop
+  channel; cleared with `RemoveMessage(id=REMOVE_ALL_MESSAGES)` by apply_damage per action
+  and begin_turn per turn.
+- `relevant_query` stays until WP15 deletes it.
+
+`AppConfig` (`config.py`) — new fields, env-overridable via default_factory like `model`:
+- `temperature: float = 0.0` (`DND_TEMPERATURE`)
+- `num_ctx: int = 16384` (`DND_NUM_CTX`, ollama only)
+- `keep_alive: str = "10m"` (`DND_KEEP_ALIVE`, ollama only)
+- `model_kwargs: dict = {}` (`DND_MODEL_KWARGS` as JSON; merged LAST, wins)
+- `fuzzy_threshold_lookup: 40 → 60`; `fuzzy_threshold_combatant: 70 → 80`
+- `stream_nodes` default → `{"respond"}` (WP15 flips it; WP10 keeps current default so the
+  old graph still streams until then — WP10 adds ONLY the new fields).
+
+## §17. Deterministic damage engine (`engine.py`, new; pure, no LangGraph imports)
+
+```python
+def parse_dice(expr) -> (num, sides, modifier)          # "2d6+1" -> (2,6,1); ValueError on bad
+def roll_dice_expr(expr, rng, *, double_dice=False, extra_dice=0) -> (total, [rolls])
+def ability_mod(score) -> int                            # (score - 10) // 2
+def is_deterministic(resolved) -> bool                   # resolved.item is not None
+def compute_damage(resolved, combatants, action_index, rng=None) -> DamageReport
+```
+
+Rules:
+1. Weapon: roll each type in `WeaponDef.damage`; add `ability_mod(actor.attributes[weapon
+   .ability])` + `magic_bonus` ONCE to the primary (first) type. Independent roll per target.
+2. Crit (`action.is_critical_hit`): every damage die rolled twice (weapon, rider, and
+   attack-roll spell dice). Modifiers/flat bonuses NOT doubled. Save spells never crit.
+3. Riders: each actor StatusEffect with `damage_rider` adds those dice (weapon attacks
+   only); rider dice double on crit.
+4. Feature hooks from `resolved.feature_defs`: `crit_extra_die` → +1 primary weapon die on
+   crit; `flat_damage_bonus` always if `opt_in=False`, else only when id ∈
+   `resolved.features_invoked`.
+5. Spells: `SpellDef.damage` dice; upcast adds `scaling_per_higher_level` ×
+   `max(0, action.spell_level - spell.level)`. No ability mod on spell damage. Saves
+   assumed failed / attacks assumed to hit (documented simplification, matches current
+   behavior).
+6. AoE (`targeting == "area"`): ONE roll, FULL total to EACH target. `"single"` with
+   multiple targets: independent roll per target.
+7. Healing: `SpellDef.healing` dice per target.
+8. Zero-damage casts (pure buffs): 0-total DamageReport with description
+   "X casts Y." — flows through apply_damage harmlessly.
+9. Per-type totals clamp ≥ 0. `breakdown` human-readable
+   (`{"slashing": "2d6+5 = 12 [4,3]+5"}`); `description` deterministic one-liner.
+
+`nodes/damage_det.py`: thin node factory — `{"pending_report": engine.compute_damage(...)}`.
+
+## §18. Node contracts
+
+**begin_turn** (extended): resets scratch incl. new fields (`turn_status="parse_failed"`,
+`pending_report=None`, `turn_event_start=len(event_log)`), clears `damage_messages`
+(REMOVE_ALL_MESSAGES), and ORPHAN-SWEEPS main `messages`: emit RemoveMessage for EVERY
+ToolMessage and every AIMessage with tool_calls anywhere in history (heals threads poisoned
+by aborted turns / pre-migration checkpoints — under the new policy none may legally exist).
+
+**parse_turn** (`nodes/parse.py`, merged relevance+parse): one structured-output call
+(`ParsedTurn` now has `relevant`), extract_json fallback. Status mapping:
+- both paths fail/raise → `turn_status="parse_failed"`
+- `relevant is False` OR `actions == []` → `"irrelevant"`
+- else → `"combat"` (advance_round-only and status-only turns ARE combat).
+Prompt additions: `relevant` semantics; self-targeting sentinel
+(`targets: [{"name": "self"}]`); spell name always in `weapon_or_spell` for casts; do NOT
+list statuses_applied for named spells (system auto-applies; statuses_applied is only for
+ad-hoc conditions); advance_round needs no actor. Input = SystemMessage + last 10 persisted
+messages (clean under the new policy). Apply `strip_think` before extract_json.
+
+**resolve_combatants** (overhaul):
+- AUTO-APPLY `SpellDef.applies_status` on cast: status lands per `SpellDef.targeting`
+  (`self` → actor; else → resolved target_ids — fixes Hold-Person-on-caster), with
+  `damage_rider` copied onto the StatusEffect and `grants_temp_hp` applied to the status
+  target as `temp_hp = max(existing, grant)` (5e no-stack). Event_log line for every status
+  application/removal and temp-HP grant. `statuses_applied` still honored for ad-hoc
+  conditions (dedup by canonical name).
+- Dead combatants filtered from fuzzy target candidates EXCEPT heal actions.
+- Adhoc multi-target reuse: match existing living combatants by slug before creating
+  (no full-HP resurrection of `cultist_1..3` on the second volley).
+- `advance_round` is actorless: process even when actor is ""/unresolvable; produces no
+  ResolvedAction (unchanged).
+- Populate `item_id`/`item_kind`/`feature_defs`/`features_invoked` on ResolvedAction.
+
+**calculate_damage** (LLM fallback only): invokes on
+`[SystemMessage(action prompt)] + state["damage_messages"]` — NEVER main history (kills
+cross-action pollution). Returns `{"damage_messages": [response]}`. Prompt trimmed: drop
+duplicate status dump; only `features_invoked`+relevant riders as "in play"; keep
+`is_crit`/`spell_level`/target ACs.
+
+**apply_damage**: report source = `pending_report` (use+clear) else extract from
+`damage_messages` final AIMessage (strip_think first), then clear channel. Temp HP:
+`absorbed = min(temp_hp, damage)`; `temp_hp -= absorbed`; `hp -= damage - absorbed`; event
+line mentions absorption. Healing revives: `hp > 0` → strip dead/unconscious statuses,
+`is_alive=True`; healing never restores temp_hp. AoE full-damage handled upstream by
+engine; the even-split fallback stays ONLY for degraded LLM reports and must distribute
+`total_healing` too. Never touches main `messages`.
+
+**respond** (`nodes/respond.py`, new; replaces narrate + no_actions): the ONE user-facing
+LLM call, streamed. Inputs: turn_status, `event_log[turn_event_start:]`, damage_reports,
+round_number, HP snapshot lines (`name: hp/max_hp (+N temp)`) for combatants touched this
+turn. Four modes (computed in Python, one template):
+- combat with material → 2–3 vivid sentences that MUST include the numbers (damage per
+  target, remaining HP) sourced ONLY from the slice/reports;
+- combat with empty slice → explain what couldn't be matched;
+- irrelevant → one short in-character DM nudge;
+- parse_failed → brief apology + one-line example action.
+Deterministic fallback INSIDE the node: LLM raises or returns empty (after strip_think) →
+synthesize AIMessage from the event slice / canned mode line. Returns
+`{"messages": [AIMessage]}` — the only AIMessage persisted per turn.
+
+**Message-persistence policy**: main history grows by exactly [HumanMessage, respond
+AIMessage] per turn. Reports live in `damage_reports` + `event_log` only. System prompts
+ephemeral everywhere (unchanged convention).
+
+## §19. tools.py / llm.py
+
+- `strip_think(text) -> str`: removes `<think>...</think>` blocks + leading unclosed
+  `<think>` prefix. Applied to EVERY raw LLM text read (parse fallback, damage final
+  message, respond guard).
+- `extract_json` rewrite: pre-strip think blocks + markdown fences; scan ALL `{`/`[`
+  candidates in order; attempt each balanced span; return first that json.loads (current
+  impl returns None on first JSONDecodeError — tools.py:90-93).
+- `fuzzy_match`: `processor=rapidfuzz.utils.default_process` (case/punct insensitive);
+  score = `max(token_set_ratio, 0.9 * partial_ratio)`; default threshold param 60.
+- `divide`: `max(0, math.floor(a / b))` — halving-save semantics; half of 1 is 0; document.
+- `subtract` docstring: "Subtracts b from a."
+- `llm.get_llm`: `kwargs = {"temperature": config.temperature}`; if provider == "ollama":
+  `|= {"num_ctx": config.num_ctx, "keep_alive": config.keep_alive, "reasoning": False}`;
+  `|= config.model_kwargs` (wins); pass to init_chat_model. (langchain-ollama 0.3.10
+  supports `reasoning=False` — verified. strip_think stays as the second layer since cloud
+  models may ignore it.) Keep the provider-gated `parallel_tool_calls` from the WP9 fix;
+  WP15 deletes graph.py's dead `_bind_tools` try/except (B13) by reusing llm.py's gate.
+
+## §20. app.py / demo.py / JSX (WP16)
+
+- `async for chunk in app.astream(...)` (sync `app.stream` blocks the event loop).
+- `openai_client = AsyncOpenAI()` moves lazily INSIDE `speech_to_text` → keyless ollama
+  boot (B1). `CHAINLIT_AUTH_SECRET` prompt stays.
+- Stream filter: `config.stream_nodes` (now `{"respond"}`); rename the shadowed `msg` loop
+  variable (B22); guard: if nothing streamed, send last AIMessage content or canned line.
+- Audio: fix `wav_file` NameError on empty buffer (B23); send the transcription message.
+- JSX: render `temp_hp` (e.g. `62/62 +50` and/or a shield chip next to the HP bar).
+  Existing status badges already work once statuses actually land.
+- demo.py: print temp_hp in roster; note 2-LLM-call expectation in docstring.
+- README: Part-2 features note; fix persistence overclaim (in-memory checkpointer, resume
+  = new combat) (B19 wording only).
+
+## §21. Work packages / phases (pause gate after EVERY phase)
+
+| Phase | WP | Owns (exclusive) | Depends |
+|---|---|---|---|
+| H1 | WP10 contracts & data | schemas.py, state.py, config.py, registry.py, data/{spells,features,weapons}.json, tests/{test_schemas,test_state,test_registry}.py | — |
+| H2 | WP11 tools+llm | tools.py, llm.py, tests/{test_tools,test_llm_config}.py | H1 |
+| H2 | WP12 engine | engine.py (new), tests/test_engine.py (new) | H1 |
+| H3 | WP13 deterministic nodes | nodes/{begin_turn,resolve,apply,damage_det}.py, tests/test_nodes_deterministic.py | H2 |
+| H3 | WP14 LLM nodes | nodes/{parse,respond,damage}.py, tests/test_nodes_llm.py (must NOT delete relevance.py/narrate.py or touch nodes/__init__.py) | H2 |
+| H4 | WP15 graph+integration | graph.py, nodes/__init__.py, tests/test_graph_integration.py; SOLE deletion rights: nodes/relevance.py, nodes/narrate.py, state.relevant_query, config.enable_narration, stream_nodes default flip | H3 |
+| H5 | WP16 app+UI+docs | src/app.py, src/demo.py, public/elements/LanggraphStateDisplay.jsx, README.md, chainlit.md | H4 |
+
+Acceptance per WP (orchestrator verifies itself; suite green at EVERY gate):
+- WP10: full suite green (additive fields default cleanly); new tests: temp_hp default,
+  damage_rider dice validation, tensers/savage/GWM JSON round-trip, registry level/PB
+  passthrough. stream_nodes default UNCHANGED this phase.
+- WP11: strip_think cases; extract_json recovers JSON after broken first candidate and
+  inside think-polluted text; fuzzy: "longsword" ≠ flametongue at 60, "bob" ≠ kobold at 80,
+  "AVANTOR" matches avantor; divide(0,2)==0, divide(1,2)==0, divide(-4,2)==0; monkeypatched
+  init_chat_model capture asserts ollama kwargs + temperature.
+- WP12: seeded-RNG tests for every §17 rule (crit doubles dice not modifiers; L5 fireball
+  = 10d6; tensers rider 2d12→4d12 on crit; savage +1 die crit-only; GWM +10 only when
+  invoked; AoE full per target; heal; clamp).
+- WP13: regression test per bug: auto-apply status incl. targeting + event lines + temp-HP
+  grant no-stack; dead-target filter (heals exempt); adhoc reuse; actorless advance_round
+  ticks durations; orphan sweep removes mid-history scaffolding; apply temp-HP absorption +
+  revive; even-split fallback distributes healing.
+- WP14: parse status mapping (relevant-false → irrelevant; garbage → parse_failed;
+  think-wrapped fallback JSON parses); respond 4 modes + deterministic fallback + exactly
+  one AIMessage; damage uses damage_messages only (consciously deletes ~6 relevance/narrate
+  tests, replaces with these).
+- WP15: integration — matched-weapon turn consumes EXACTLY 2 scripted LLM responses;
+  homebrew turn exercises tool loop, main messages NEVER holds a ToolMessage; post-turn
+  messages == [Human, AI]; irrelevant turn yields an AIMessage; pre-poisoned checkpoint
+  healed next turn; mixed det+LLM 2-action turn has no cross-action bleed (risk 1).
+- WP16: py_compile; `env -u OPENAI_API_KEY` boot-path import works on ollama default;
+  stream filter matches respond; JSX shows temp_hp; README claims match code. Manual
+  Chainlit/demo smokes deferred to user.
+
+## §22. Risks
+1. damage_messages channel under SqliteSaver (REMOVE_ALL + re-add per action) → WP15 mixed
+   det+LLM integration test is mandatory.
+2. Small-model `relevant` flag unreliability → actions==[] mapping is the net; worst case a
+   polite nudge.
+3. `reasoning=False` ignored by some cloud models → strip_think mandatory everywhere.
+4. Old checkpoints: additive schema hydrates via pydantic defaults; begin_turn sweep heals
+   poisoned histories; enable_narration removal affects code only.
+5. WP13/WP14 parallel coupling → orchestrator pastes §16 contracts verbatim into both
+   prompts; NEITHER may edit schemas.py.

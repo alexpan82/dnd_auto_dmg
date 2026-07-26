@@ -18,12 +18,13 @@ Covers:
 import sqlite3
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from pydantic import BaseModel
 
-from dnd_auto_dmg.schemas import Combatant, StatusEffect
+from dnd_auto_dmg.schemas import Combatant, DamageReport, StatusEffect
 from dnd_auto_dmg.state import CombatState, merge_combatants
 
 # ---------------------------------------------------------------------------
@@ -339,3 +340,90 @@ def test_scripted_llm_two_fixtures_do_not_share_queue_state(make_scripted_llm):
     assert llm_a.responses is not llm_b.responses
     assert llm_a.invoke([HumanMessage(content="x")]).content == "a"
     assert llm_b.invoke([HumanMessage(content="x")]).content == "b"
+
+
+# ---------------------------------------------------------------------------
+# WP10 -- new CombatState scratch channels
+# ---------------------------------------------------------------------------
+
+
+def test_combat_state_declares_new_wp10_scratch_channels():
+    """All new §16 scratch fields are present on CombatState, and the
+    pre-existing ``relevant_query`` field (kept until WP15) is untouched."""
+    annotations = CombatState.__annotations__
+    for field in (
+        "relevant_query",
+        "turn_status",
+        "turn_event_start",
+        "pending_report",
+        "damage_messages",
+    ):
+        assert field in annotations, f"expected {field!r} in CombatState.__annotations__"
+
+
+def test_damage_messages_channel_uses_add_messages_reducer(tmp_path):
+    """``damage_messages`` is an isolated ``add_messages`` channel: writes
+    append, and ``RemoveMessage(id=REMOVE_ALL_MESSAGES)`` clears it -- exactly
+    like ``messages`` -- without touching the main ``messages`` channel."""
+    db_path = tmp_path / "ckpt.sqlite"
+    thread_cfg = {"configurable": {"thread_id": "t1"}}
+
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    saver = SqliteSaver(conn)
+
+    g = StateGraph(CombatState)
+
+    def write_damage_messages(state: CombatState) -> dict:
+        return {
+            "messages": [HumanMessage(content="main channel")],
+            "damage_messages": [AIMessage(content="tool loop message")],
+        }
+
+    g.add_node("write", write_damage_messages)
+    g.add_edge(START, "write")
+    g.add_edge("write", END)
+    graph = g.compile(checkpointer=saver)
+
+    result = graph.invoke({}, thread_cfg)
+    assert len(result["damage_messages"]) == 1
+    assert result["damage_messages"][0].content == "tool loop message"
+    assert len(result["messages"]) == 1
+
+    # Clear damage_messages only -- messages must survive untouched.
+    g2 = StateGraph(CombatState)
+
+    def clear_damage_messages(state: CombatState) -> dict:
+        return {"damage_messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
+
+    g2.add_node("clear", clear_damage_messages)
+    g2.add_edge(START, "clear")
+    g2.add_edge("clear", END)
+    graph2 = g2.compile(checkpointer=saver)
+
+    result2 = graph2.invoke({}, thread_cfg)
+    assert result2["damage_messages"] == []
+    assert len(result2["messages"]) == 1
+
+
+def test_turn_status_and_turn_event_start_and_pending_report_are_last_write_wins():
+    """These three fields have no reducer registered -- a node's returned
+    value simply overwrites the channel, same as ``round_number``."""
+    g = StateGraph(CombatState)
+
+    def set_scratch(state: CombatState) -> dict:
+        return {
+            "turn_status": "combat",
+            "turn_event_start": 3,
+            "pending_report": DamageReport(action_index=0, total_damage=7),
+        }
+
+    g.add_node("set_scratch", set_scratch)
+    g.add_edge(START, "set_scratch")
+    g.add_edge("set_scratch", END)
+    graph = g.compile()
+
+    result = graph.invoke({})
+    assert result["turn_status"] == "combat"
+    assert result["turn_event_start"] == 3
+    assert isinstance(result["pending_report"], DamageReport)
+    assert result["pending_report"].total_damage == 7

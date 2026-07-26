@@ -54,6 +54,11 @@ class StatusEffect(BaseModel):
     duration_rounds: Optional[int] = None  # None = until removed
     applied_round: Optional[int] = None
     notes: Optional[str] = None
+    #: dmg_type -> dice string, e.g. {"force": "2d12"}. Copied from the
+    #: matching ``AppliedStatus.damage_rider`` at cast time (already
+    #: dice-validated there) so the damage engine never needs a registry
+    #: lookup to know what extra damage a status grants.
+    damage_rider: Optional[Dict[str, str]] = None
 
 
 class Combatant(BaseModel):
@@ -71,6 +76,9 @@ class Combatant(BaseModel):
     inventory: List[str] = Field(default_factory=list)  # ids into weapons.json
     origin: Literal["roster", "adhoc"] = "roster"
     is_alive: bool = True  # set False when hp reaches 0
+    temp_hp: int = 0
+    level: Optional[int] = None
+    proficiency_bonus: Optional[int] = None
 
 
 class TargetRef(BaseModel):
@@ -83,7 +91,7 @@ class TargetRef(BaseModel):
 class ParsedAction(BaseModel):
     """A single action extracted from free-text narration by the LLM."""
 
-    actor: str
+    actor: str = ""  # "" for actorless actions (e.g. advance_round)
     action_type: Literal[
         "attack",
         "heal",
@@ -106,6 +114,11 @@ class ParsedTurn(BaseModel):
     """Structured-output wrapper for one or more parsed actions."""
 
     actions: List[ParsedAction] = Field(default_factory=list)
+    #: Whether this turn's narration is relevant to combat processing at
+    #: all (distinct from ``ParsedAction.action_type == "other"``, which is
+    #: a per-action classification). Defaults to True so existing callers
+    #: that never set it keep today's behavior.
+    relevant: bool = True
 
 
 class ResolvedAction(BaseModel):
@@ -117,7 +130,11 @@ class ResolvedAction(BaseModel):
     target_ids: List[str] = Field(default_factory=list)
     item: Optional[dict] = None  # matched weapon/spell def (model_dump) or None
     item_name_raw: Optional[str] = None  # unmatched name -> LLM 5e-knowledge fallback
-    feature_texts: Dict[str, str] = Field(default_factory=dict)  # id -> effect text
+    item_id: Optional[str] = None  # canonical id of the matched item, if any
+    item_kind: Optional[Literal["weapon", "spell"]] = None
+    feature_texts: Dict[str, str] = Field(default_factory=dict)  # id -> effect text (LLM fallback prompt)
+    feature_defs: Dict[str, dict] = Field(default_factory=dict)  # id -> FeatureDef.model_dump()
+    features_invoked: List[str] = Field(default_factory=list)  # canonical ids resolved from action.features_used
 
 
 class PerTargetDamage(BaseModel):
@@ -193,6 +210,18 @@ class AppliedStatus(BaseModel):
     name: str
     duration_rounds: Optional[int] = None
     effect: str
+    #: dmg_type -> dice string granted while this status is active, e.g.
+    #: {"force": "2d12"}. Copied verbatim onto the runtime ``StatusEffect``
+    #: at cast time (see ``StatusEffect.damage_rider``).
+    damage_rider: Optional[Dict[str, str]] = None
+    grants_temp_hp: Optional[int] = None
+
+    @field_validator("damage_rider")
+    @classmethod
+    def _validate_damage_rider(cls, value: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+        if value is None:
+            return value
+        return _validate_dice_dict(value)
 
 
 class SpellDef(BaseModel):
@@ -230,6 +259,9 @@ class FeatureDef(BaseModel):
     name: str
     description: str = ""
     effect: str = ""  # mechanical text consumed by the damage LLM
+    crit_extra_die: bool = False  # e.g. Savage Attacks
+    flat_damage_bonus: int = 0  # e.g. Great Weapon Master's +10
+    opt_in: bool = False  # feature only applies when the actor chooses it (e.g. GWM's -5/+10)
 
 
 class MonsterDef(BaseModel):

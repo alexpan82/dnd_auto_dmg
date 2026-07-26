@@ -5,6 +5,54 @@
         "magic_bonus": 1,
         "ability": "strength",
         "properties": ["two-handed", "heavy"],
-        "special_effects": "While the sword is ablaze, it deals an extra 2d6 fire damage on a hit."
+        "special_effects": "The blade is wreathed in flame, casting bright light in a 40-foot radius."
+    },
+    "longsword": {
+        "name": "Longsword",
+        "damage": {"slashing": "1d8"},
+        "magic_bonus": 0,
+        "ability": "strength",
+        "properties": ["versatile"],
+        "special_effects": ""
+    },
+    "greatsword": {
+        "name": "Greatsword",
+        "damage": {"slashing": "2d6"},
+        "magic_bonus": 0,
+        "ability": "strength",
+        "properties": ["two-handed", "heavy"],
+        "special_effects": ""
+    },
+    "dagger": {
+        "name": "Dagger",
+        "damage": {"piercing": "1d4"},
+        "magic_bonus": 0,
+        "ability": "dexterity",
+        "properties": ["finesse", "light", "thrown"],
+        "special_effects": ""
+    },
+    "shortbow": {
+        "name": "Shortbow",
+        "damage": {"piercing": "1d6"},
+        "magic_bonus": 0,
+        "ability": "dexterity",
+        "properties": ["ammunition", "two-handed"],
+        "special_effects": ""
+    },
+    "mace": {
+        "name": "Mace",
+        "damage": {"bludgeoning": "1d6"},
+        "magic_bonus": 0,
+        "ability": "strength",
+        "properties": [],
+        "special_effects": ""
+    },
+    "handaxe": {
+        "name": "Handaxe",
+        "damage": {"slashing": "1d6"},
+        "magic_bonus": 0,
+        "ability": "strength",
+        "properties": ["light", "thrown"],
+        "special_effects": ""
     }
 }
